@@ -10,7 +10,8 @@
       "Bash(npm create *)",
       "Bash(npm install *)",
       "Bash(git add *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(cd \"/Users/kevinrouff/Claude/Projects/AI Pen\" && rm -f reading-tool/public/test-tmp/*.jpeg && cp test-assets/IMG_9694.jpeg test-assets/IMG_9696.jpeg reading-tool/public/test-tmp/)"
     ]
   }
 }
