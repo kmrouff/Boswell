@@ -12,6 +12,11 @@ export const BUFFER_RATIO = 0.05;
 // crop underneath is more generous.
 export const VISUAL_BUFFER_RATIO = 0.015;
 
+// Half-height of the band captured around a single point for the
+// double-tap-and-hold "log title" gesture (there's no drag extent to work
+// from, so we just grab a modest fixed band around the touch point).
+export const TITLE_CAPTURE_HALF_HEIGHT = 0.05;
+
 export const normalizePoint = (clientX, clientY, rect) => ({
   x: (clientX - rect.left) / rect.width,
   y: (clientY - rect.top) / rect.height,
@@ -46,3 +51,22 @@ export const cropVideoFrame = (videoEl, selectionBounds) => {
   ctx.drawImage(videoEl, 0, yMinPx, videoWidth, height, 0, 0, videoWidth, height);
   return canvas.toDataURL('image/jpeg', 0.9);
 };
+
+// Scales a JPEG data URL down to at most maxWidthPx wide, for storing a
+// lightweight thumbnail alongside a passage rather than the full crop.
+export const createThumbnail = (dataUrl, maxWidthPx = 400) =>
+  new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxWidthPx / img.width);
+      const width = Math.round(img.width * scale);
+      const height = Math.round(img.height * scale);
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL('image/jpeg', 0.7));
+    };
+    img.onerror = reject;
+    img.src = dataUrl;
+  });

@@ -3,7 +3,7 @@
 - [x] Phase 0 — Scaffold + Storage
 - [x] Phase 1 — Claude API layer (single-image + continuation check)
 - [x] Phase 2 — Capture view (camera + touch-drag selection) — real-phone verified, see note
-- [ ] Phase 3 — Wire capture to Claude + instant save + undo
+- [x] Phase 3 — Wire capture to Claude + instant save + undo (+ title/page context)
 - [ ] Phase 4 — Continuation detection
 - [ ] Phase 5 — Voice notes
 - [ ] Phase 6 — Library view
@@ -38,3 +38,16 @@ No AI wiring yet — this phase intentionally stops at "correct crop in memory,"
    - Along the way, found and fixed a real bug (not just a headless-testing artifact): both fade timers depended on an inline callback prop that gets a new identity every parent re-render, which would restart the fade countdown if the app re-rendered for an unrelated reason mid-fade (e.g. a second drag starting quickly). Fixed by stabilizing the callback via a ref so each fade timer runs to completion exactly once, regardless of parent re-renders.
 
 All verified logic (crop accuracy, tap-rejection, drag-to-capture) re-confirmed after these changes. Ready for Phase 3.
+
+**Phase 3 (2026-07-05):** Wired the real end-to-end flow: drag → crop → async `extractPassage` → instant save → toast/undo, non-blocking throughout. Removed the Phase 2 debug panel — real toasts (`UndoToast.jsx`) replace it now. `App.jsx` listens for a `passage-saved` window event and briefly pulses the Library tab (scale + color) as a lightweight "it landed" cue.
+
+**Scope addition — passage provenance (user-requested mid-Phase-3):** the user asked for a way to trace a passage back to its source/page, since the v3 spec's data model didn't cover this. Folded into this phase rather than done separately, since it's the same save-flow/data-model work and reuses the same touch-handling code in `CaptureView`:
+- `extractPassage`'s prompt/schema (`lib/claude.js`) now also asks for a best-effort `pageNumber` (string or null — only when actually visible in the image, not guessed) and folds title/author into the existing `context` field.
+- New double-tap-and-hold gesture (tap once, then tap-and-hold near the same spot within ~300ms, hold ~450ms) captures a small band around the touch point, runs it through `extractPassage`, and stores the result as a "currently logged source title" (`storage.js`: `getCurrentSourceTitle`/`setCurrentSourceTitle`, a single plain string in `localStorage`, not a grouping entity — user explicitly deferred grouping/sectioning to Phase 6 when the Library UI exists to design against). Shown via `TitleLoggedFlash.jsx` (same fade mechanics as `CaptureFlash`, plus a faint "Title Logged" label).
+- Every passage now carries `sourceTitle` (the currently-logged title at the *moment of capture*, not whenever extraction resolves — grabbed synchronously so a title logged mid-flight doesn't retroactively relabel an in-flight capture) and `pageNumber`. Both are `null` until a title is ever logged; Claude's own `context` guess remains the fallback the user asked for.
+- Added a second first-use hint line ("Don't forget to log the title...") alongside the existing drag hint, dismissed together.
+- `imageThumb` is now actually generated (`createThumbnail` in `lib/capture.js`, capped 400px wide) and stored per the v3 data model — this had been stubbed as `null` conceptually until now.
+
+**Testing notes:** Verified against the real API (not mocked) — confirmed a full real capture saves a well-formed passage (including the new `pageNumber` field), the toast appears (~4s after touch-end, matching real extraction latency) with working Undo (deletes the passage, dismisses the toast), the error path (simulated network failure) shows "Couldn't read that" and saves nothing, and the double-tap-hold gesture correctly arms/fires and logs a title from real extracted text. One thing worth knowing: while debugging the hold-gesture timing, I hit the same background-tab timer throttling as in the Phase 2 revision (a `setTimeout` I intended as ~100ms actually elapsed ~970ms in this headless environment) — this only affects test reliability in this dev sandbox, not real usage on an active phone screen, but flagging it so it doesn't look like a mystery if you see similar oddities testing here yourself.
+
+**Needs your real-device judgment:** the double-tap-and-hold timing (300ms window, 450ms hold) is a first guess, not tuned against a real thumb — please try logging a title on an actual title page and let me know if it feels too easy/hard to trigger, and whether it ever fires by accident during normal reading drags.

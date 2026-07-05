@@ -7,13 +7,15 @@ const EXTRACT_SYSTEM_PROMPT = `You are a reading annotation assistant. The user 
 The image may include a bit more or less than the exact intended passage, since the selection has a buffer margin built in. Your job:
 1. Read the text visible in the image
 2. Use semantic reasoning to identify the coherent unit of meaning most likely intended — trim obvious unrelated fragments at the very top/bottom edges if they're clearly incomplete or unrelated, but when in doubt include rather than exclude
-3. Identify the likely source type (book, printout, screen, presentation slide, etc.)
+3. Identify the likely source type (book, printout, screen, presentation slide, etc.), including author/title if legible or inferable
+4. If a page number is visible anywhere in the image, report it — otherwise null. Don't guess if it's not actually visible.
 
 Respond ONLY with JSON, no markdown fences:
 {
   "rawText": "full extracted text including buffer",
   "refinedText": "the semantically coherent target passage",
   "context": "brief source description",
+  "pageNumber": "the visible page number as a string, or null if none is visible",
   "confidence": "high | medium | low"
 }
 
