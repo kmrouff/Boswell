@@ -1,0 +1,42 @@
+// Minimum vertical movement (as a fraction of frame height) required for a
+// drag to count as an intentional selection rather than an accidental tap.
+export const MIN_DRAG_DELTA = 0.03;
+
+// Buffer margin added above/below the raw drag bounds so text right at the
+// edge of the gesture doesn't get clipped.
+export const BUFFER_RATIO = 0.05;
+
+export const normalizePoint = (clientX, clientY, rect) => ({
+  x: (clientX - rect.left) / rect.width,
+  y: (clientY - rect.top) / rect.height,
+});
+
+export const isMeaningfulDrag = (touchPath, minDelta = MIN_DRAG_DELTA) => {
+  if (touchPath.length < 2) return false;
+  const ys = touchPath.map((p) => p.y);
+  return Math.max(...ys) - Math.min(...ys) >= minDelta;
+};
+
+export const computeSelectionBounds = (touchPath, bufferRatio = BUFFER_RATIO) => {
+  const ys = touchPath.map((p) => p.y);
+  return {
+    yMin: Math.max(0, Math.min(...ys) - bufferRatio),
+    yMax: Math.min(1, Math.max(...ys) + bufferRatio),
+  };
+};
+
+// Crops the current video frame to the full width x [yMin, yMax] vertical
+// band (in the video's own pixel space) and returns a JPEG data URL.
+export const cropVideoFrame = (videoEl, selectionBounds) => {
+  const { videoWidth, videoHeight } = videoEl;
+  const yMinPx = Math.round(selectionBounds.yMin * videoHeight);
+  const yMaxPx = Math.round(selectionBounds.yMax * videoHeight);
+  const height = Math.max(1, yMaxPx - yMinPx);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = videoWidth;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(videoEl, 0, yMinPx, videoWidth, height, 0, 0, videoWidth, height);
+  return canvas.toDataURL('image/jpeg', 0.9);
+};
