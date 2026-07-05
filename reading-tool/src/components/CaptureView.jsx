@@ -20,10 +20,16 @@ const HINT_DISMISSED_KEY = 'capture_hint_dismissed';
 
 // Double-tap-and-hold gesture (logs the title) tuning: a second touch must
 // land within this window and this close to the first tap's position, and
-// then be held (without moving) for the hold duration to count.
+// then be held for the hold duration to count.
 const DOUBLE_TAP_WINDOW_MS = 300;
 const HOLD_DURATION_MS = 450;
-const TAP_POSITION_THRESHOLD = 0.04;
+// How close the second tap needs to land to the first — generous, since two
+// deliberate taps in quick succession rarely land on the exact same pixel.
+const DOUBLE_TAP_POSITION_THRESHOLD = 0.08;
+// How much the finger can drift *during* the hold before it's treated as the
+// start of a drag instead. A held finger naturally wobbles more than a tap
+// lands off-target, so this is intentionally looser than the threshold above.
+const HOLD_MOVE_CANCEL_THRESHOLD = 0.12;
 
 export default function CaptureView() {
   const videoRef = useRef(null);
@@ -151,8 +157,8 @@ export default function CaptureView() {
     if (
       prevTap &&
       performance.now() - prevTap.time < DOUBLE_TAP_WINDOW_MS &&
-      Math.abs(point.x - prevTap.x) < TAP_POSITION_THRESHOLD &&
-      Math.abs(point.y - prevTap.y) < TAP_POSITION_THRESHOLD
+      Math.abs(point.x - prevTap.x) < DOUBLE_TAP_POSITION_THRESHOLD &&
+      Math.abs(point.y - prevTap.y) < DOUBLE_TAP_POSITION_THRESHOLD
     ) {
       holdTimerRef.current = setTimeout(() => {
         holdTimerRef.current = null;
@@ -173,8 +179,8 @@ export default function CaptureView() {
     if (holdTimerRef.current) {
       const origin = touchPathRef.current[0];
       const moved =
-        Math.abs(point.x - origin.x) > TAP_POSITION_THRESHOLD ||
-        Math.abs(point.y - origin.y) > TAP_POSITION_THRESHOLD;
+        Math.abs(point.x - origin.x) > HOLD_MOVE_CANCEL_THRESHOLD ||
+        Math.abs(point.y - origin.y) > HOLD_MOVE_CANCEL_THRESHOLD;
       if (moved) {
         clearTimeout(holdTimerRef.current);
         holdTimerRef.current = null;
