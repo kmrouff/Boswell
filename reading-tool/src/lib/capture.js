@@ -3,8 +3,14 @@
 export const MIN_DRAG_DELTA = 0.03;
 
 // Buffer margin added above/below the raw drag bounds so text right at the
-// edge of the gesture doesn't get clipped.
+// edge of the gesture doesn't get clipped. Used for the actual crop sent
+// for extraction.
 export const BUFFER_RATIO = 0.05;
+
+// Smaller buffer used only for the on-screen flash/tick feedback, so the
+// capture *looks* tight to what was actually dragged, even though the real
+// crop underneath is more generous.
+export const VISUAL_BUFFER_RATIO = 0.015;
 
 export const normalizePoint = (clientX, clientY, rect) => ({
   x: (clientX - rect.left) / rect.width,

@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import SelectionBand from './SelectionBand.jsx';
-import { normalizePoint, isMeaningfulDrag, computeSelectionBounds, cropVideoFrame } from '../lib/capture.js';
+import MarginTicks from './MarginTicks.jsx';
+import CaptureFlash from './CaptureFlash.jsx';
+import {
+  normalizePoint,
+  isMeaningfulDrag,
+  computeSelectionBounds,
+  cropVideoFrame,
+  VISUAL_BUFFER_RATIO,
+} from '../lib/capture.js';
 
 const HINT_DISMISSED_KEY = 'capture_hint_dismissed';
 
@@ -11,7 +18,8 @@ export default function CaptureView() {
   const startTimeRef = useRef(0);
 
   const [cameraError, setCameraError] = useState(null);
-  const [bandBounds, setBandBounds] = useState(null);
+  const [dragBounds, setDragBounds] = useState(null);
+  const [captureBounds, setCaptureBounds] = useState(null);
   const [lastCapture, setLastCapture] = useState(null);
   const [hintDismissed, setHintDismissed] = useState(
     () => localStorage.getItem(HINT_DISMISSED_KEY) === 'true'
@@ -44,7 +52,7 @@ export default function CaptureView() {
     const point = normalizePoint(touch.clientX, touch.clientY, rect);
     startTimeRef.current = performance.now();
     touchPathRef.current = [{ ...point, t: 0 }];
-    setBandBounds({ min: point.y, max: point.y });
+    setDragBounds({ min: point.y, max: point.y });
     navigator.vibrate?.(10);
     if (!hintDismissed) dismissHint();
   };
@@ -55,12 +63,12 @@ export default function CaptureView() {
     const point = normalizePoint(touch.clientX, touch.clientY, rect);
     touchPathRef.current.push({ ...point, t: performance.now() - startTimeRef.current });
     const ys = touchPathRef.current.map((p) => p.y);
-    setBandBounds({ min: Math.min(...ys), max: Math.max(...ys) });
+    setDragBounds({ min: Math.min(...ys), max: Math.max(...ys) });
   };
 
   const handleTouchEnd = () => {
     navigator.vibrate?.(10);
-    setBandBounds(null);
+    setDragBounds(null);
 
     const path = touchPathRef.current;
     touchPathRef.current = [];
@@ -71,6 +79,9 @@ export default function CaptureView() {
     const selectionBounds = computeSelectionBounds(path);
     const dataUrl = cropVideoFrame(videoRef.current, selectionBounds);
     setLastCapture({ dataUrl, selectionBounds, touchPath: path });
+    // Visual feedback uses a tighter buffer than the actual crop, so the
+    // capture *looks* precise even though the real crop is more generous.
+    setCaptureBounds(computeSelectionBounds(path, VISUAL_BUFFER_RATIO));
   };
 
   return (
@@ -90,12 +101,29 @@ export default function CaptureView() {
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
       >
-        {containerRef.current && bandBounds && (
-          <SelectionBand
-            startY={bandBounds.min}
-            currentY={bandBounds.max}
+        {containerRef.current && dragBounds && (
+          <MarginTicks
+            yMin={dragBounds.min}
+            yMax={dragBounds.max}
             containerHeight={containerRef.current.clientHeight}
           />
+        )}
+
+        {containerRef.current && captureBounds && (
+          <>
+            <MarginTicks
+              yMin={captureBounds.yMin}
+              yMax={captureBounds.yMax}
+              containerHeight={containerRef.current.clientHeight}
+              fading
+            />
+            <CaptureFlash
+              yMin={captureBounds.yMin}
+              yMax={captureBounds.yMax}
+              containerHeight={containerRef.current.clientHeight}
+              onDone={() => setCaptureBounds(null)}
+            />
+          </>
         )}
       </div>
 

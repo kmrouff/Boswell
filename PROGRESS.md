@@ -2,7 +2,7 @@
 
 - [x] Phase 0 — Scaffold + Storage
 - [x] Phase 1 — Claude API layer (single-image + continuation check)
-- [x] Phase 2 — Capture view (camera + touch-drag selection) — needs real-phone verification, see note
+- [x] Phase 2 — Capture view (camera + touch-drag selection) — real-phone verified, see note
 - [ ] Phase 3 — Wire capture to Claude + instant save + undo
 - [ ] Phase 4 — Continuation detection
 - [ ] Phase 5 — Voice notes
@@ -24,3 +24,17 @@
 No AI wiring yet — this phase intentionally stops at "correct crop in memory," nothing is sent anywhere.
 
 **Testing caveat — this needs verification on your actual phone before Phase 3.** This dev environment has no real camera or touchscreen, so I verified the logic as thoroughly as possible without one: unit-tested `isMeaningfulDrag`/`computeSelectionBounds`/`normalizePoint` directly, then exercised the *actual* component code path end-to-end by feeding a canvas-based synthetic `MediaStream` into the real `<video>` element and dispatching synthetic `TouchEvent`s at the real DOM handlers — confirmed the crop is pixel-accurate against a real photo, the band tracks correctly, taps are correctly ignored, and drags correctly fire a capture. What I *couldn't* verify: real finger drag ergonomics (does 5% feel like the right tap-vs-drag threshold in practice?), real camera stream behavior/orientation on an actual phone, and touch-action/scroll-suppression behavior in real mobile Safari/Chrome (used `touch-action: none` via Tailwind's `touch-none`, which is the standard modern approach, but should be confirmed on-device). Please try it on your phone (`npm run dev -- --host`, per the spec's env instructions) and let me know if the threshold or camera behavior needs adjusting before Phase 3.
+
+**Phase 2 revision — real-device feedback (2026-07-05):** Tested on an actual phone over the local network. Found two things:
+
+1. **Camera never prompted for permission.** Root cause: `getUserMedia` requires a secure context, and the dev server was plain HTTP over the LAN (only `localhost` is exempt). Added `@vitejs/plugin-basic-ssl` so `npm run dev -- --host` now serves HTTPS with a self-signed cert (`vite.config.js`) — you'll hit a one-time "not private" warning on the phone, which is expected for local dev, not a real issue. Since the automated preview browser I use for verification can't click through that cert warning, HTTPS is now gated behind `VITE_DISABLE_HTTPS` (see `npm run dev:preview`) so my own testing loop still works in plain HTTP without touching what you use on your phone.
+
+2. **Design feedback on the selection UI**, leading to a redesign of the live-drag and capture-feedback visuals:
+   - The full-width translucent band during drag was replaced with `MarginTicks.jsx` — thin bracket-style tick marks confined to the left/right margins, leaving the text itself completely uncovered while dragging.
+   - On release, instead of a persistent overlay, `CaptureFlash.jsx` shows a brief flash across the captured region that fades out on its own (~550ms), and the margin ticks fade out with it — nothing lingers that needs manual dismissal.
+   - You asked whether the selection could visually "stick" to the physical page (compensating for hand-shake) rather than staying screen-locked — flagged that this would require real-time optical feature tracking of the camera feed, a meaningfully bigger CV feature not in the original spec, and you opted to skip it and keep the simpler screen-locked model.
+   - Tick color changed from parchment/tan to a dark slate-blue (`bg-slate-700/90`) — the original light tan was low-contrast against white/cream book pages.
+   - The on-screen flash/tick region now uses a much smaller buffer (`VISUAL_BUFFER_RATIO = 0.015`) than the actual backend crop (`BUFFER_RATIO = 0.05`) — the crop sent for extraction is unchanged and still generous, but the visual feedback now looks tight to what was actually dragged, so it reads as precise.
+   - Along the way, found and fixed a real bug (not just a headless-testing artifact): both fade timers depended on an inline callback prop that gets a new identity every parent re-render, which would restart the fade countdown if the app re-rendered for an unrelated reason mid-fade (e.g. a second drag starting quickly). Fixed by stabilizing the callback via a ref so each fade timer runs to completion exactly once, regardless of parent re-renders.
+
+All verified logic (crop accuracy, tap-rejection, drag-to-capture) re-confirmed after these changes. Ready for Phase 3.
