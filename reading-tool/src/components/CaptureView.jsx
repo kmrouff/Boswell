@@ -12,6 +12,7 @@ import {
   createThumbnail,
   VISUAL_BUFFER_RATIO,
   TITLE_CAPTURE_HALF_HEIGHT,
+  TITLE_CAPTURE_MARGIN_X,
 } from '../lib/capture.js';
 import { extractPassage } from '../lib/claude.js';
 import { savePassage, deletePassage, getCurrentSourceTitle, setCurrentSourceTitle } from '../lib/storage.js';
@@ -43,7 +44,7 @@ export default function CaptureView() {
   const [cameraError, setCameraError] = useState(null);
   const [dragBounds, setDragBounds] = useState(null);
   const [captureBounds, setCaptureBounds] = useState(null);
-  const [titleBounds, setTitleBounds] = useState(null);
+  const [titleCapture, setTitleCapture] = useState(null); // { bounds, phase: 'capturing' | 'logged' }
   const [toasts, setToasts] = useState([]);
   const [hintDismissed, setHintDismissed] = useState(
     () => localStorage.getItem(HINT_DISMISSED_KEY) === 'true'
@@ -57,7 +58,14 @@ export default function CaptureView() {
           video: { facingMode: { ideal: 'environment' } },
           audio: false,
         });
-        if (videoRef.current) videoRef.current.srcObject = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          // Explicit play() rather than relying solely on the autoPlay
+          // attribute — some mobile browsers show a transient native
+          // play/pause affordance when they have to resume playback
+          // themselves; calling play() ourselves avoids that.
+          await videoRef.current.play().catch(() => {});
+        }
       } catch (err) {
         setCameraError(err);
       }
@@ -121,24 +129,41 @@ export default function CaptureView() {
     pushToast('Captured', () => deletePassage(passage.id));
   };
 
-  // Double-tap-and-hold on a title page: captures a small band around the
+  // Double-tap-and-hold on a title page: captures a book-page-shaped
+  // rectangle (margins on the sides, a tall band vertically) around the
   // touch point and uses the extracted text as the "currently logged"
   // source title, tagged onto every passage saved from here on.
   const handleTitleLogHold = async (point) => {
     navigator.vibrate?.([10, 40, 10]);
     const bounds = {
+      xMin: TITLE_CAPTURE_MARGIN_X,
+      xMax: 1 - TITLE_CAPTURE_MARGIN_X,
       yMin: Math.max(0, point.y - TITLE_CAPTURE_HALF_HEIGHT),
       yMax: Math.min(1, point.y + TITLE_CAPTURE_HALF_HEIGHT),
     };
-    setTitleBounds(bounds);
+    // Shown immediately so the gesture feels acknowledged right away, even
+    // though we don't know the extraction result yet.
+    setTitleCapture({ bounds, phase: 'capturing' });
 
-    if (!videoRef.current || videoRef.current.readyState < 2) return;
+    if (!videoRef.current || videoRef.current.readyState < 2) {
+      setTitleCapture(null);
+      return;
+    }
     const dataUrl = cropVideoFrame(videoRef.current, bounds);
     const result = await extractPassage(dataUrl);
-    if (result.error) return;
+    if (result.error) {
+      setTitleCapture(null);
+      return;
+    }
 
     const title = (result.refinedText || result.rawText || '').trim();
-    if (title) setCurrentSourceTitle(title);
+    if (!title) {
+      setTitleCapture(null);
+      return;
+    }
+    setCurrentSourceTitle(title);
+    // Only now does the big "Title Logged" confirmation appear and fade.
+    setTitleCapture((prev) => (prev ? { ...prev, phase: 'logged' } : null));
   };
 
   const handleTouchStart = (e) => {
@@ -220,6 +245,7 @@ export default function CaptureView() {
         autoPlay
         playsInline
         muted
+        disablePictureInPicture
         className="h-full w-full object-cover"
       />
 
@@ -255,12 +281,16 @@ export default function CaptureView() {
           </>
         )}
 
-        {containerRef.current && titleBounds && (
+        {containerRef.current && titleCapture && (
           <TitleLoggedFlash
-            yMin={titleBounds.yMin}
-            yMax={titleBounds.yMax}
+            xMin={titleCapture.bounds.xMin}
+            xMax={titleCapture.bounds.xMax}
+            yMin={titleCapture.bounds.yMin}
+            yMax={titleCapture.bounds.yMax}
+            containerWidth={containerRef.current.clientWidth}
             containerHeight={containerRef.current.clientHeight}
-            onDone={() => setTitleBounds(null)}
+            phase={titleCapture.phase}
+            onDone={() => setTitleCapture(null)}
           />
         )}
       </div>

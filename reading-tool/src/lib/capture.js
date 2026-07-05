@@ -12,10 +12,12 @@ export const BUFFER_RATIO = 0.05;
 // crop underneath is more generous.
 export const VISUAL_BUFFER_RATIO = 0.015;
 
-// Half-height of the band captured around a single point for the
-// double-tap-and-hold "log title" gesture (there's no drag extent to work
-// from, so we just grab a modest fixed band around the touch point).
-export const TITLE_CAPTURE_HALF_HEIGHT = 0.05;
+// Region captured for the double-tap-and-hold "log title" gesture: a
+// book-page-shaped rectangle (margins on the sides, a tall band vertically)
+// centered on the touch point, rather than a thin full-width line — a title
+// page needs more context than a single line of body text does.
+export const TITLE_CAPTURE_HALF_HEIGHT = 0.22;
+export const TITLE_CAPTURE_MARGIN_X = 0.08;
 
 export const normalizePoint = (clientX, clientY, rect) => ({
   x: (clientX - rect.left) / rect.width,
@@ -36,19 +38,24 @@ export const computeSelectionBounds = (touchPath, bufferRatio = BUFFER_RATIO) =>
   };
 };
 
-// Crops the current video frame to the full width x [yMin, yMax] vertical
-// band (in the video's own pixel space) and returns a JPEG data URL.
-export const cropVideoFrame = (videoEl, selectionBounds) => {
+// Crops the current video frame to a [xMin, xMax] x [yMin, yMax] region (in
+// the video's own pixel space) and returns a JPEG data URL. xMin/xMax default
+// to the full width, for the normal full-width-band passage capture.
+export const cropVideoFrame = (videoEl, bounds) => {
   const { videoWidth, videoHeight } = videoEl;
-  const yMinPx = Math.round(selectionBounds.yMin * videoHeight);
-  const yMaxPx = Math.round(selectionBounds.yMax * videoHeight);
+  const { yMin, yMax, xMin = 0, xMax = 1 } = bounds;
+  const yMinPx = Math.round(yMin * videoHeight);
+  const yMaxPx = Math.round(yMax * videoHeight);
+  const xMinPx = Math.round(xMin * videoWidth);
+  const xMaxPx = Math.round(xMax * videoWidth);
   const height = Math.max(1, yMaxPx - yMinPx);
+  const width = Math.max(1, xMaxPx - xMinPx);
 
   const canvas = document.createElement('canvas');
-  canvas.width = videoWidth;
+  canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext('2d');
-  ctx.drawImage(videoEl, 0, yMinPx, videoWidth, height, 0, 0, videoWidth, height);
+  ctx.drawImage(videoEl, xMinPx, yMinPx, width, height, 0, 0, width, height);
   return canvas.toDataURL('image/jpeg', 0.9);
 };
 
