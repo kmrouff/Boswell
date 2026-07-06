@@ -12,12 +12,19 @@ export const BUFFER_RATIO = 0.05;
 // crop underneath is more generous.
 export const VISUAL_BUFFER_RATIO = 0.015;
 
-// Region captured for the double-tap-and-hold "log title" gesture: a
-// book-page-shaped rectangle (margins on the sides, a tall band vertically)
-// centered on the touch point, rather than a thin full-width line — a title
-// page needs more context than a single line of body text does.
-export const TITLE_CAPTURE_HALF_HEIGHT = 0.22;
-export const TITLE_CAPTURE_MARGIN_X = 0.08;
+// Region captured for the "log title" gesture: a fixed, centered,
+// book-page-shaped (portrait) rectangle — not tied to the tap position, so
+// it can't end up asymmetric/landscape-shaped from being clamped near an
+// edge of the frame the way a point-centered box could.
+const TITLE_CAPTURE_WIDTH_RATIO = 0.8;
+const TITLE_CAPTURE_HEIGHT_RATIO = 0.7;
+
+export const getTitleCaptureBounds = () => ({
+  xMin: 0.5 - TITLE_CAPTURE_WIDTH_RATIO / 2,
+  xMax: 0.5 + TITLE_CAPTURE_WIDTH_RATIO / 2,
+  yMin: 0.5 - TITLE_CAPTURE_HEIGHT_RATIO / 2,
+  yMax: 0.5 + TITLE_CAPTURE_HEIGHT_RATIO / 2,
+});
 
 export const normalizePoint = (clientX, clientY, rect) => ({
   x: (clientX - rect.left) / rect.width,

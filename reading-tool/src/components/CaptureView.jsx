@@ -10,36 +10,27 @@ import {
   computeSelectionBounds,
   cropVideoFrame,
   createThumbnail,
+  getTitleCaptureBounds,
   VISUAL_BUFFER_RATIO,
-  TITLE_CAPTURE_HALF_HEIGHT,
-  TITLE_CAPTURE_MARGIN_X,
 } from '../lib/capture.js';
 import { extractPassage } from '../lib/claude.js';
 import { savePassage, deletePassage, getCurrentSourceTitle, setCurrentSourceTitle } from '../lib/storage.js';
 
 const HINT_DISMISSED_KEY = 'capture_hint_dismissed';
 
-// Double-tap-and-hold gesture (logs the title) tuning: a second touch must
-// land within this window and this close to the first tap's position, and
-// then be held for the hold duration to count.
-const DOUBLE_TAP_WINDOW_MS = 300;
-const HOLD_DURATION_MS = 450;
-// How close the second tap needs to land to the first — generous, since two
-// deliberate taps in quick succession rarely land on the exact same pixel.
-const DOUBLE_TAP_POSITION_THRESHOLD = 0.08;
-// How much the finger can drift *during* the hold before it's treated as the
-// start of a drag instead. A held finger naturally wobbles more than a tap
-// lands off-target, so this is intentionally looser than the threshold above.
-const HOLD_MOVE_CANCEL_THRESHOLD = 0.12;
+// Triple-tap gesture (logs the title): three taps in a row, each within this
+// window of the previous and this close in position, with no hold required.
+// A plain tap-tap-tap rather than a hold sidesteps iOS/Android's native
+// long-press text-selection/magnifier UI, which a sustained hold triggers.
+const TRIPLE_TAP_WINDOW_MS = 400;
+const TRIPLE_TAP_POSITION_THRESHOLD = 0.08;
 
 export default function CaptureView() {
   const videoRef = useRef(null);
   const containerRef = useRef(null);
   const touchPathRef = useRef([]);
   const startTimeRef = useRef(0);
-  const pendingTapRef = useRef(null);
-  const holdTimerRef = useRef(null);
-  const holdTriggeredRef = useRef(false);
+  const tapHistoryRef = useRef([]); // most recent taps (oldest first), max length 2
 
   const [cameraError, setCameraError] = useState(null);
   const [dragBounds, setDragBounds] = useState(null);
@@ -129,18 +120,12 @@ export default function CaptureView() {
     pushToast('Captured', () => deletePassage(passage.id));
   };
 
-  // Double-tap-and-hold on a title page: captures a book-page-shaped
-  // rectangle (margins on the sides, a tall band vertically) around the
-  // touch point and uses the extracted text as the "currently logged"
-  // source title, tagged onto every passage saved from here on.
-  const handleTitleLogHold = async (point) => {
-    navigator.vibrate?.([10, 40, 10]);
-    const bounds = {
-      xMin: TITLE_CAPTURE_MARGIN_X,
-      xMax: 1 - TITLE_CAPTURE_MARGIN_X,
-      yMin: Math.max(0, point.y - TITLE_CAPTURE_HALF_HEIGHT),
-      yMax: Math.min(1, point.y + TITLE_CAPTURE_HALF_HEIGHT),
-    };
+  // Triple-tap on a title page: captures a fixed, centered, book-page-shaped
+  // (portrait) rectangle and uses the extracted text as the "currently
+  // logged" source title, tagged onto every passage saved from here on.
+  const handleTitleLogTripleTap = async () => {
+    navigator.vibrate?.([10, 40, 10, 40, 10]);
+    const bounds = getTitleCaptureBounds();
     // Shown immediately so the gesture feels acknowledged right away, even
     // though we don't know the extraction result yet.
     setTitleCapture({ bounds, phase: 'capturing' });
@@ -175,22 +160,6 @@ export default function CaptureView() {
     setDragBounds({ min: point.y, max: point.y });
     navigator.vibrate?.(10);
     if (!hintDismissed) dismissHint();
-
-    holdTriggeredRef.current = false;
-    const prevTap = pendingTapRef.current;
-    pendingTapRef.current = null;
-    if (
-      prevTap &&
-      performance.now() - prevTap.time < DOUBLE_TAP_WINDOW_MS &&
-      Math.abs(point.x - prevTap.x) < DOUBLE_TAP_POSITION_THRESHOLD &&
-      Math.abs(point.y - prevTap.y) < DOUBLE_TAP_POSITION_THRESHOLD
-    ) {
-      holdTimerRef.current = setTimeout(() => {
-        holdTimerRef.current = null;
-        holdTriggeredRef.current = true;
-        handleTitleLogHold(point);
-      }, HOLD_DURATION_MS);
-    }
   };
 
   const handleTouchMove = (e) => {
@@ -200,38 +169,37 @@ export default function CaptureView() {
     touchPathRef.current.push({ ...point, t: performance.now() - startTimeRef.current });
     const ys = touchPathRef.current.map((p) => p.y);
     setDragBounds({ min: Math.min(...ys), max: Math.max(...ys) });
-
-    if (holdTimerRef.current) {
-      const origin = touchPathRef.current[0];
-      const moved =
-        Math.abs(point.x - origin.x) > HOLD_MOVE_CANCEL_THRESHOLD ||
-        Math.abs(point.y - origin.y) > HOLD_MOVE_CANCEL_THRESHOLD;
-      if (moved) {
-        clearTimeout(holdTimerRef.current);
-        holdTimerRef.current = null;
-      }
-    }
   };
 
   const handleTouchEnd = () => {
     navigator.vibrate?.(10);
     setDragBounds(null);
 
-    if (holdTimerRef.current) {
-      clearTimeout(holdTimerRef.current);
-      holdTimerRef.current = null;
-    }
-
     const path = touchPathRef.current;
     touchPathRef.current = [];
 
-    if (holdTriggeredRef.current) return;
-
     if (!isMeaningfulDrag(path)) {
-      pendingTapRef.current = { time: performance.now(), x: path[0].x, y: path[0].y };
+      const now = performance.now();
+      const tap = { time: now, x: path[0].x, y: path[0].y };
+      // Drop any prior taps too old to still combo with this one.
+      const recent = tapHistoryRef.current.filter((t) => now - t.time < TRIPLE_TAP_WINDOW_MS);
+      const closeToAll = recent.every(
+        (t) =>
+          Math.abs(t.x - tap.x) < TRIPLE_TAP_POSITION_THRESHOLD &&
+          Math.abs(t.y - tap.y) < TRIPLE_TAP_POSITION_THRESHOLD
+      );
+
+      if (recent.length === 2 && closeToAll) {
+        tapHistoryRef.current = [];
+        handleTitleLogTripleTap();
+      } else if (closeToAll) {
+        tapHistoryRef.current = [...recent, tap];
+      } else {
+        tapHistoryRef.current = [tap];
+      }
       return;
     }
-    pendingTapRef.current = null;
+    tapHistoryRef.current = [];
 
     if (!videoRef.current || videoRef.current.readyState < 2) return;
 
@@ -251,7 +219,7 @@ export default function CaptureView() {
 
       <div
         ref={containerRef}
-        className="absolute inset-0 touch-none"
+        className="absolute inset-0 touch-none select-none [-webkit-touch-callout:none]"
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}

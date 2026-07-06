@@ -4,8 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 // more deliberate action and should read as a clear confirmation, not a blip.
 const LOGGED_FADE_MS = 2200;
 
-// Two-phase feedback for the double-tap-and-hold "log title" gesture:
-// - 'capturing': shown the instant the hold fires, before extraction
+// Two-phase feedback for the triple-tap "log title" gesture:
+// - 'capturing': shown the instant the triple-tap fires, before extraction
 //   resolves — just the rectangle, so the gesture feels acknowledged
 //   immediately even though we don't know the result yet.
 // - 'logged': shown once extraction actually succeeds — the big "Title
@@ -47,10 +47,7 @@ export default function TitleLoggedFlash({ xMin, xMax, yMin, yMax, containerWidt
       }}
     >
       {logged && (
-        <span
-          className="rounded-lg bg-black/55 px-8 py-4 font-display text-5xl uppercase text-parchment"
-          style={{ letterSpacing: '0.2em' }}
-        >
+        <span className="rounded-lg bg-black/55 px-8 py-4 font-sans text-3xl font-medium tracking-wide text-parchment">
           Title Logged
         </span>
       )}
