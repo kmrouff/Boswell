@@ -47,9 +47,9 @@ export const replacePassages = (idsToRemove, newPassage) => {
 
 export const clearAllPassages = () => writePassages([]);
 
-// The "currently logged" source title, set via the double-tap-and-hold
-// gesture on the title page. Attached to every passage saved while active —
-// a plain string tag for now, not a grouping entity (see PROGRESS.md).
+// The "currently logged" source title, set via the triple-tap gesture on
+// the title page. Attached to every passage saved while active — a plain
+// string tag for now, not a grouping entity (see PROGRESS.md).
 export const getCurrentSourceTitle = () => localStorage.getItem(CURRENT_SOURCE_TITLE_KEY) || null;
 
 export const setCurrentSourceTitle = (title) => {

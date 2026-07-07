@@ -15,6 +15,7 @@ import {
 } from '../lib/capture.js';
 import { extractPassage, extractTitle } from '../lib/claude.js';
 import { savePassage, deletePassage, getCurrentSourceTitle, setCurrentSourceTitle } from '../lib/storage.js';
+import { maybeMergeWithPrevious } from '../lib/continuation.js';
 
 const HINT_DISMISSED_KEY = 'capture_hint_dismissed';
 
@@ -118,6 +119,10 @@ export default function CaptureView() {
     savePassage(passage);
     window.dispatchEvent(new CustomEvent('passage-saved', { detail: { id: passage.id } }));
     pushToast('Captured', () => deletePassage(passage.id));
+
+    // Fire-and-forget: entirely invisible to the user either way, per spec —
+    // no toast, no prompt, whether it merges or not.
+    maybeMergeWithPrevious(passage);
   };
 
   // Triple-tap on a title page: captures a fixed, centered, book-page-shaped

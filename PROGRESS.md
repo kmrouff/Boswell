@@ -4,7 +4,7 @@
 - [x] Phase 1 — Claude API layer (single-image + continuation check)
 - [x] Phase 2 — Capture view (camera + touch-drag selection) — real-phone verified, see note
 - [x] Phase 3 — Wire capture to Claude + instant save + undo (+ title/page context)
-- [ ] Phase 4 — Continuation detection
+- [x] Phase 4 — Continuation detection
 - [ ] Phase 5 — Voice notes
 - [ ] Phase 6 — Library view
 - [ ] Phase 7 — Chat view
@@ -88,3 +88,16 @@ All verified logic (crop accuracy, tap-rejection, drag-to-capture) re-confirmed 
 **Phase 3 revision 4 — latency fix (2026-07-06):** you confirmed the gesture/UI now works, but noted the pause before "Title Logged" appears felt too long. Root cause: title-logging was reusing `extractPassage` — the same heavyweight function used for real passage capture, asking for `rawText`/`refinedText`/`context`/`pageNumber`/`confidence` on a large image, when a title only needs one short string. Added a dedicated `extractTitle()` in `lib/claude.js`: smaller resize (768px vs 1024px), a much shorter prompt, lower `max_tokens` (150 vs 1024), and a minimal `{ title }` response shape. Measured directly against the real API on the same crop: **~3.4s vs ~11.5s** for the old approach — roughly 3x faster. `CaptureView.jsx`'s triple-tap handler now calls `extractTitle` instead of `extractPassage`. Re-verified end-to-end via the actual gesture (title logged correctly in ~2.5s total) and confirmed no regression elsewhere.
 
 **Ready for Phase 4 — continuation detection**, per `BUILD_PHASES_V3.md`: heuristic pre-filter (bottom-of-frame + missing terminal punctuation) run after each save, comparing to the immediately-preceding passage, with `checkContinuation` (already implemented and verified in Phase 1) called only when the heuristic flags a candidate, merging via `replacePassages` (already implemented in Phase 0).
+
+**Phase 4 (2026-07-06):** New `lib/continuation.js` — `isCandidateContinuation` (pure heuristic: prev passage's `selectionBounds.yMax > 0.85`, new passage's `selectionBounds.yMin < 0.15`, prev's `refinedText` missing terminal punctuation `[.!?]`; at least 2 of 3 required, per spec) and `maybeMergeWithPrevious` (orchestration: pulls the immediately-preceding passage from storage, runs the heuristic, calls `checkContinuation` only if flagged, and merges via `replacePassages` if confirmed — wrapped in try/catch so any failure leaves both passages separate, the safe default). Wired into `CaptureView.jsx`'s `performCapture` as a fire-and-forget call right after save — entirely invisible either way, no toast, no prompt, per spec.
+
+Found and fixed a real bug while verifying: the merged entry's `mergedFromIds` was computed as `prevPassage.mergedFromIds ?? [prevPassage.id]`, but a fresh (non-merged) passage's `mergedFromIds` is always `[]` — never `null`/`undefined` — so `??` never fell through to `[prevPassage.id]`, and the previous passage's own id silently vanished from the merge chain. Fixed by branching on `prevPassage.isMerged` instead of on `mergedFromIds` being empty.
+
+**Verified against the real API in all three scenarios the spec calls for:**
+- Heuristic unit-tested directly (positive/negative/edge cases including the hyphenated-word case) — all correct.
+- A real continuation case (a sentence manually split at a page break, matching bounds + missing punctuation) correctly merged via a live `checkContinuation` call, producing coherent `refinedText` and a correct `mergedFromIds: [prevId, newId]`.
+- A case where the heuristic flags a candidate (bounds match) but the content is actually unrelated correctly did *not* merge — Claude itself caught it even though the cheap pre-filter didn't.
+- An obvious non-candidate (both passages mid-page) was rejected by the heuristic alone, confirmed via elapsed time (~0ms, i.e. no API call was even made) — this is the "cheap, local, no-API-call pre-filter" working as intended, not just a lucky correct outcome.
+- Re-ran a full real drag-capture through the actual UI afterward to confirm no regression from wiring this in.
+
+**Known simplification, called out explicitly in the spec as acceptable:** the existing Undo button's `deletePassage(id)` doesn't know how to "un-merge" — if a passage gets auto-merged shortly after its toast appears and the user taps Undo, it silently no-ops (the id it was pointing at no longer exists post-merge) rather than restoring both originals. The spec explicitly says this case "doesn't need to be perfect," so it wasn't implemented; flagging in case it comes up in real use.
