@@ -7,7 +7,7 @@
 - [x] Phase 4 — Continuation detection
 - [x] Phase 5 — Voice notes — needs real-mic verification, see note
 - [x] Phase 6 — Library view
-- [ ] Phase 7 — Chat view
+- [x] Phase 7 — Chat view
 - [ ] Phase 8 — Polish pass
 
 ## Notes
@@ -144,3 +144,9 @@ Library cards (`PassageCard.jsx`) redesigned:
 **Audio is now transcription-only (`lib/dictation.js`, Web Speech API):** Claude's API can't transcribe audio (text/image/PDF only), so voice notes and title dictation use the browser's `SpeechRecognition` — live on-device transcription, **no audio blob stored** (matches the "convert to text, discard audio" decision). `lib/audio.js` (the old MediaRecorder path) was deleted. Passages store `audioTranscript` text; `audioNote` stays in the model but is always null now.
 
 **Verified in-browser against the real API and real component:** page auto-detection correctly read "Page 100" off a real page photo; title indicator → title mode → type-a-title → applied and persisted; the same flow from a Library card's "Add title" correctly applied to just that passage and left the global title untouched; cards hide the context guess, stay compact, show the distinct collapsed voice-note annotation, expand on tap; "+" menu Add page inline works; by-title grouping with Miscellaneous works. **Not verifiable here (needs your phone):** actual voice dictation / voice-note transcription — the Web Speech API reports as "supported" in the preview but can't produce real transcripts without a mic, and its iOS Safari reliability is the known caveat. Also the page-indicator drag-to-scroll adjust (pointer-drag) and title-mode record-button dictation want real-device confirmation.
+
+**Phase 7 — Chat view (2026-07-06):** Built `ChatView.jsx` on top of the already-verified `chatWithPassages` streaming backend. A message thread (user right-aligned in parchment, assistant left-aligned) that streams the response token-by-token, a header showing "Chat over N passages" with a Clear button, an auto-growing textarea (Enter to send, Shift+Enter for newline), and two empty states: a "capture something first" state that disables the input when there are zero passages, and a suggestions state (four clickable starter prompts) once passages exist. Errors reaching the API surface as an inline assistant message rather than crashing. Auto-scrolls to the newest message; refreshes its passage count on `passage-saved`.
+
+Also enriched the passage context injected into the chat system prompt (`lib/claude.js`): it now leads with `sourceTitle` + `pageNumber` (falling back to the old `context` guess only if no title), and includes any `audioTranscript` as the user's own annotation on that passage — so the assistant can cite by title/page and factor in voice notes.
+
+**Verified end-to-end against the real streaming API:** both empty states render correctly (input disabled with zero passages); a real question streamed a response that correctly synthesized across two seeded passages with quotes; multi-turn context works (a follow-up "which of the two ideas…" correctly referenced the prior turn); metadata injection works (asking "name the author and page" was answered correctly from the injected title/page); suggestion-click sends; Clear wipes the thread and restores suggestions. No console errors.

@@ -228,14 +228,21 @@ Respond ONLY with JSON, no markdown fences.`;
 // onToken is called with each incremental text chunk as it streams in.
 export const chatWithPassages = async (messages, passagesArray, onToken) => {
   const passagesContext = passagesArray
-    .map((p, i) => `[Passage ${i + 1}] (${p.context || 'unknown source'}, captured ${p.capturedAt}):\n${p.refinedText}`)
+    .map((p, i) => {
+      const source =
+        [p.sourceTitle, p.pageNumber ? `p. ${p.pageNumber}` : null].filter(Boolean).join(', ') ||
+        p.context ||
+        'unknown source';
+      const note = p.audioTranscript ? `\n(voice note: ${p.audioTranscript})` : '';
+      return `[Passage ${i + 1}] (${source}):\n${p.refinedText}${note}`;
+    })
     .join('\n\n');
 
   const systemPrompt = `You are a reading assistant helping the user reflect on and discuss passages they've captured while reading. Here are all the passages they've saved so far:
 
 ${passagesContext || '(no passages saved yet)'}
 
-Answer the user's questions using these passages as context. When relevant, quote or reference the specific passage(s) you're drawing from.`;
+Answer the user's questions using these passages as context. When relevant, quote or reference the specific passage(s) you're drawing from (by their title/page when available). Some passages may have a voice note the user recorded — treat it as their own annotation on that passage.`;
 
   const res = await fetch(API_URL, {
     method: 'POST',
