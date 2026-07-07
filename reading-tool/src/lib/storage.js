@@ -1,5 +1,6 @@
 const DB_KEY = 'passages_db';
 const CURRENT_SOURCE_TITLE_KEY = 'current_source_title';
+const CURRENT_PAGE_KEY = 'current_page';
 
 export const getPassages = () => {
   try {
@@ -54,4 +55,14 @@ export const getCurrentSourceTitle = () => localStorage.getItem(CURRENT_SOURCE_T
 
 export const setCurrentSourceTitle = (title) => {
   localStorage.setItem(CURRENT_SOURCE_TITLE_KEY, title);
+};
+
+// The "working" page number shown on the capture screen — seeded by a one-shot
+// detection, updated by captures that see a page number, and manually
+// adjustable. Attached to captures that don't detect their own page number.
+export const getCurrentPage = () => localStorage.getItem(CURRENT_PAGE_KEY) || null;
+
+export const setCurrentPage = (page) => {
+  if (page == null || page === '') localStorage.removeItem(CURRENT_PAGE_KEY);
+  else localStorage.setItem(CURRENT_PAGE_KEY, String(page));
 };

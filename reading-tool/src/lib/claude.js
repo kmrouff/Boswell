@@ -151,6 +151,48 @@ export const extractTitle = async (imageBase64) => {
   }
 };
 
+const PAGE_SYSTEM_PROMPT = `You are looking at a photo of a page from a book or document. Find the page number, which is usually a bare number printed at the very top or very bottom of the page.
+
+Respond ONLY with JSON, no markdown fences:
+{ "pageNumber": "the visible page number as a string" }
+
+If no page number is clearly visible, respond with:
+{ "pageNumber": null }`;
+
+// Lightweight page-number lookup for the live "what page am I on" indicator —
+// small image, tiny response — so it can run without noticeable cost.
+export const extractPageNumber = async (imageBase64) => {
+  try {
+    const resized = await resizeImage(imageBase64, 768);
+    const { mediaType, data } = toMediaAndData(resized);
+
+    const response = await callClaude({
+      model: MODEL,
+      max_tokens: 50,
+      system: PAGE_SYSTEM_PROMPT,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: mediaType, data } },
+            { type: 'text', text: 'What page number is visible?' },
+          ],
+        },
+      ],
+    });
+
+    const text = response.content?.[0]?.text ?? '';
+    try {
+      const parsed = parseJsonResponse(text);
+      return { pageNumber: parsed.pageNumber ?? null };
+    } catch {
+      return { pageNumber: null };
+    }
+  } catch {
+    return { pageNumber: null };
+  }
+};
+
 // Checks whether newPassage is a direct textual continuation of previousPassage
 // (e.g. across a page break) and, if so, returns a merged passage.
 export const checkContinuation = async (previousPassage, newPassage) => {

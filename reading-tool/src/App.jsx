@@ -4,9 +4,9 @@ import LibraryView from './components/LibraryView.jsx';
 import ChatView from './components/ChatView.jsx';
 
 const TABS = [
-  { id: 'capture', label: 'Capture', View: CaptureView },
-  { id: 'library', label: 'Library', View: LibraryView },
-  { id: 'chat', label: 'Chat', View: ChatView },
+  { id: 'capture', label: 'Capture' },
+  { id: 'library', label: 'Library' },
+  { id: 'chat', label: 'Chat' },
 ];
 
 const LIBRARY_PULSE_MS = 600;
@@ -14,7 +14,9 @@ const LIBRARY_PULSE_MS = 600;
 function App() {
   const [activeTab, setActiveTab] = useState('capture');
   const [libraryPulsing, setLibraryPulsing] = useState(false);
-  const ActiveView = TABS.find((t) => t.id === activeTab).View;
+  // A request from the Library to (re)set a passage's title, routed to the
+  // Capture view's title mode: { passageId } or null.
+  const [titleRequest, setTitleRequest] = useState(null);
 
   useEffect(() => {
     const onPassageSaved = () => {
@@ -25,10 +27,22 @@ function App() {
     return () => window.removeEventListener('passage-saved', onPassageSaved);
   }, []);
 
+  const requestTitleForPassage = (passageId) => {
+    setTitleRequest({ passageId });
+    setActiveTab('capture');
+  };
+
   return (
     <div className="flex h-svh w-full flex-col bg-ink text-parchment">
       <main className="min-h-0 flex-1 overflow-y-auto">
-        <ActiveView />
+        {activeTab === 'capture' && (
+          <CaptureView
+            titleRequest={titleRequest}
+            onTitleRequestHandled={() => setTitleRequest(null)}
+          />
+        )}
+        {activeTab === 'library' && <LibraryView onRequestTitle={requestTitleForPassage} />}
+        {activeTab === 'chat' && <ChatView />}
       </main>
 
       <nav className="flex shrink-0 border-t border-parchment/10 bg-ink">
@@ -38,9 +52,7 @@ function App() {
             type="button"
             onClick={() => setActiveTab(id)}
             className={`flex-1 py-3 text-sm transition-transform transition-colors duration-200 ${
-              activeTab === id
-                ? 'text-parchment'
-                : 'text-parchment/40 hover:text-parchment/60'
+              activeTab === id ? 'text-parchment' : 'text-parchment/40 hover:text-parchment/60'
             } ${id === 'library' && libraryPulsing ? 'scale-110 text-parchment' : 'scale-100'}`}
           >
             {label}

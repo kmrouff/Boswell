@@ -3,6 +3,9 @@ import { v4 as uuidv4 } from 'uuid';
 import MarginTicks from './MarginTicks.jsx';
 import CaptureFlash from './CaptureFlash.jsx';
 import TitleLoggedFlash from './TitleLoggedFlash.jsx';
+import TitleModeOverlay from './TitleModeOverlay.jsx';
+import TitleTypingOverlay from './TitleTypingOverlay.jsx';
+import PageIndicator from './PageIndicator.jsx';
 import UndoToast from './UndoToast.jsx';
 import VoiceRecordButton from './VoiceRecordButton.jsx';
 import {
@@ -16,7 +19,7 @@ import {
   cropImageRegion,
   VISUAL_BUFFER_RATIO,
 } from '../lib/capture.js';
-import { extractPassage, extractTitle } from '../lib/claude.js';
+import { extractPassage, extractTitle, extractPageNumber } from '../lib/claude.js';
 import {
   savePassage,
   deletePassage,
@@ -25,16 +28,16 @@ import {
   updatePassage,
   getCurrentSourceTitle,
   setCurrentSourceTitle,
+  getCurrentPage,
+  setCurrentPage as persistCurrentPage,
 } from '../lib/storage.js';
 import { maybeMergeWithPrevious } from '../lib/continuation.js';
-import { startRecording } from '../lib/audio.js';
+import { isDictationSupported, startDictation } from '../lib/dictation.js';
 
 const HINT_DISMISSED_KEY = 'capture_hint_dismissed';
 
-// Triple-tap gesture (logs the title): three taps in a row, each within this
-// window of the previous and this close in position, with no hold required.
-// A plain tap-tap-tap rather than a hold sidesteps iOS/Android's native
-// long-press text-selection/magnifier UI, which a sustained hold triggers.
+// Three taps in a row (within this window and this close in position) capture
+// the title while in title mode; a lone tap opens the type-a-title field.
 const TRIPLE_TAP_WINDOW_MS = 400;
 const TRIPLE_TAP_POSITION_THRESHOLD = 0.08;
 
@@ -44,13 +47,14 @@ const TRIPLE_TAP_POSITION_THRESHOLD = 0.08;
 const RECENT_CAPTURE_WINDOW_MS = 20000;
 const MAX_RECENT_CAPTURES = 4;
 
-export default function CaptureView() {
+export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
   const videoRef = useRef(null);
   const containerRef = useRef(null);
   const touchPathRef = useRef([]);
   const startTimeRef = useRef(0);
-  const tapHistoryRef = useRef([]); // most recent taps (oldest first), max length 2
-  const recorderRef = useRef(null);
+  const tapHistoryRef = useRef([]); // recent taps in title mode, max length 2
+  const titleTapTimerRef = useRef(null);
+  const dictationRef = useRef(null);
   // Recent captures kept transiently in memory (not storage) for buffer-overlap
   // de-duplication: { rawBounds, cropBounds, cropDataUrl, savedPromise, tMs }.
   const recentCapturesRef = useRef([]);
@@ -58,16 +62,22 @@ export default function CaptureView() {
   const [cameraError, setCameraError] = useState(null);
   const [dragBounds, setDragBounds] = useState(null);
   const [captureBounds, setCaptureBounds] = useState(null);
-  const [titleCapture, setTitleCapture] = useState(null); // { bounds, phase: 'capturing' | 'logged' }
+  const [titleCapture, setTitleCapture] = useState(null); // { bounds, phase } confirmation flash
+  const [titleMode, setTitleMode] = useState(null); // null | { target:'global' } | { target:'passage', passageId }
+  const [titleTyping, setTitleTyping] = useState(false);
   const [toasts, setToasts] = useState([]);
   const [isRecording, setIsRecording] = useState(false);
+  const [dictationText, setDictationText] = useState('');
   const [hasPassages, setHasPassages] = useState(() => getPassages().length > 0);
+  const [currentTitle, setCurrentTitle] = useState(() => getCurrentSourceTitle());
+  const [currentPage, setCurrentPageState] = useState(() => getCurrentPage());
   const [hintDismissed, setHintDismissed] = useState(
     () => localStorage.getItem(HINT_DISMISSED_KEY) === 'true'
   );
 
   useEffect(() => {
     let stream;
+    let cancelled = false;
     (async () => {
       try {
         stream = await navigator.mediaDevices.getUserMedia({
@@ -76,18 +86,40 @@ export default function CaptureView() {
         });
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
-          // Explicit play() rather than relying solely on the autoPlay
-          // attribute — some mobile browsers show a transient native
-          // play/pause affordance when they have to resume playback
-          // themselves; calling play() ourselves avoids that.
           await videoRef.current.play().catch(() => {});
+        }
+        // One-shot page detection so the indicator has an initial guess. Only
+        // when we don't already have a working page — captures and manual
+        // adjustment keep it current after that, so we don't re-scan on every
+        // visit.
+        if (!getCurrentPage()) {
+          setTimeout(async () => {
+            if (cancelled || !videoRef.current || videoRef.current.readyState < 2) return;
+            const frame = cropVideoFrame(videoRef.current, { yMin: 0, yMax: 1 });
+            const { pageNumber } = await extractPageNumber(frame);
+            if (!cancelled && pageNumber) {
+              persistCurrentPage(pageNumber);
+              setCurrentPageState(pageNumber);
+            }
+          }, 1200);
         }
       } catch (err) {
         setCameraError(err);
       }
     })();
-    return () => stream?.getTracks().forEach((t) => t.stop());
+    return () => {
+      cancelled = true;
+      stream?.getTracks().forEach((t) => t.stop());
+    };
   }, []);
+
+  // Enter title mode when the Library asks to (re)set a passage's title.
+  useEffect(() => {
+    if (!titleRequest) return;
+    setTitleMode({ target: 'passage', passageId: titleRequest.passageId });
+    tapHistoryRef.current = [];
+    onTitleRequestHandled?.();
+  }, [titleRequest, onTitleRequestHandled]);
 
   const dismissHint = () => {
     localStorage.setItem(HINT_DISMISSED_KEY, 'true');
@@ -102,17 +134,50 @@ export default function CaptureView() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
+  const updatePageState = (page) => {
+    persistCurrentPage(page);
+    setCurrentPageState(page);
+  };
+
+  const exitTitleMode = () => {
+    if (dictationRef.current) {
+      dictationRef.current.stop();
+      dictationRef.current = null;
+      setIsRecording(false);
+      setDictationText('');
+    }
+    clearTimeout(titleTapTimerRef.current);
+    tapHistoryRef.current = [];
+    setTitleTyping(false);
+    setTitleMode(null);
+  };
+
+  // Applies a captured/typed/dictated title to whatever the current title mode
+  // targets — the global "working title" (tags future captures) or a specific
+  // existing passage (from the Library "add title" flow) — then exits.
+  const applyTitle = (title) => {
+    if (titleMode?.target === 'passage') {
+      updatePassage(titleMode.passageId, { sourceTitle: title });
+      window.dispatchEvent(new CustomEvent('passage-saved', { detail: { id: titleMode.passageId } }));
+    } else {
+      setCurrentSourceTitle(title);
+      setCurrentTitle(title);
+    }
+    clearTimeout(titleTapTimerRef.current);
+    tapHistoryRef.current = [];
+    setTitleTyping(false);
+    setTitleMode(null);
+  };
+
   // Retroactively trims a previous capture's overlapping buffer once a later
   // capture reveals where the two should meet, so the shared region isn't
-  // extracted into both passages. Re-crops the previous capture's retained
-  // image (no re-touching the camera) and re-extracts it. Fire-and-forget and
-  // fully guarded: any failure leaves the previous passage exactly as it was.
+  // extracted into both passages. Fully guarded: any failure leaves the
+  // previous passage exactly as it was.
   const reChopPrevious = (prev, chopLine, newIsLower) => {
     prev.savedPromise.then(async (prevId) => {
-      if (!prevId) return; // previous never saved (extraction failed)
+      if (!prevId) return;
       const current = getPassage(prevId);
-      if (!current) return; // deleted, or merged away into another entry
-      // new below prev → prev is the upper one → trim its bottom, and vice versa.
+      if (!current) return;
       const newBounds = newIsLower
         ? { ...current.selectionBounds, yMax: Math.min(current.selectionBounds.yMax, chopLine) }
         : { ...current.selectionBounds, yMin: Math.max(current.selectionBounds.yMin, chopLine) };
@@ -131,16 +196,12 @@ export default function CaptureView() {
     });
   };
 
-  // Async and non-blocking by design: the UI already returned to ready state
-  // by the time this runs, and multiple of these can be in flight at once if
-  // the user gestures again quickly — each resolves into its own passage.
+  // Async and non-blocking: the UI is already back to ready by the time this
+  // runs, and several can be in flight at once if the user gestures again.
   const performCapture = async (path) => {
     const rawBounds = rawBoundsOf(path);
     let cropBounds = computeSelectionBounds(path);
 
-    // De-duplicate buffer overlaps against recent captures on the same static
-    // view: chop this capture's colliding side, and schedule the previous
-    // capture to be re-trimmed on its side so neither double-captures the gap.
     const now = performance.now();
     recentCapturesRef.current = recentCapturesRef.current.filter(
       (c) => now - c.tMs < RECENT_CAPTURE_WINDOW_MS
@@ -156,15 +217,11 @@ export default function CaptureView() {
     }
 
     const dataUrl = cropVideoFrame(videoRef.current, cropBounds);
-    // Grab the active title now, not whenever extraction resolves, so a
-    // title logged mid-flight doesn't retroactively relabel this passage.
     const sourceTitle = getCurrentSourceTitle();
+    const workingPage = getCurrentPage();
 
     setCaptureBounds(computeSelectionBounds(path, VISUAL_BUFFER_RATIO));
 
-    // Register this capture as "recent" before extraction so a rapid next
-    // gesture can de-dup against it; savedPromise resolves to its id once
-    // saved (or null if extraction fails).
     let resolveSaved;
     const savedPromise = new Promise((r) => (resolveSaved = r));
     recentCapturesRef.current = [
@@ -180,13 +237,17 @@ export default function CaptureView() {
       return;
     }
 
+    // A page number the capture actually saw wins and updates the indicator;
+    // otherwise fall back to whatever page we currently think we're on.
+    if (result.pageNumber) updatePageState(result.pageNumber);
+
     const passage = {
       id: uuidv4(),
       capturedAt: new Date().toISOString(),
       rawText: result.rawText,
       refinedText: result.refinedText,
       context: result.context,
-      pageNumber: result.pageNumber ?? null,
+      pageNumber: result.pageNumber ?? workingPage ?? null,
       sourceTitle,
       touchPath: path,
       selectionBounds: cropBounds,
@@ -202,52 +263,65 @@ export default function CaptureView() {
     window.dispatchEvent(new CustomEvent('passage-saved', { detail: { id: passage.id } }));
     pushToast('Captured', () => deletePassage(passage.id));
 
-    // Fire-and-forget: entirely invisible to the user either way, per spec —
-    // no toast, no prompt, whether it merges or not.
     maybeMergeWithPrevious(passage);
   };
 
-  // Attaches to whichever passage was most recently saved at the moment
-  // recording *stops* (not started) — if a new passage lands mid-recording,
-  // the note follows the newer one, per spec.
+  // Record button: dictates a title while in title mode (amber), otherwise
+  // records a voice note that's transcribed to text and attached to the most
+  // recent passage. Audio itself is never stored.
   const handleRecordToggle = async () => {
     if (isRecording) {
       navigator.vibrate?.(10);
+      const controller = dictationRef.current;
+      dictationRef.current = null;
       setIsRecording(false);
-      const controller = recorderRef.current;
-      recorderRef.current = null;
       controller?.stop();
-      const result = await controller?.stopPromise;
-      if (!result) return;
+      let transcript = '';
+      try {
+        transcript = (await controller?.finalPromise) || '';
+      } catch {
+        transcript = '';
+      }
+      transcript = transcript.trim();
+      setDictationText('');
 
+      if (titleMode) {
+        if (transcript) applyTitle(transcript);
+        else exitTitleMode();
+        return;
+      }
+
+      if (!transcript) return;
       const latest = getPassages()[0];
-      if (!latest) return; // nothing to attach to anymore — graceful no-op
-      updatePassage(latest.id, { audioNote: result.dataUrl, audioTranscript: null });
+      if (!latest) return; // nothing to attach to anymore
+      updatePassage(latest.id, { audioTranscript: transcript, audioNote: null });
+      window.dispatchEvent(new CustomEvent('passage-saved', { detail: { id: latest.id } }));
       return;
     }
 
-    if (!hasPassages) {
+    if (!titleMode && !hasPassages) {
       pushToast('Capture something first');
+      return;
+    }
+    if (!isDictationSupported()) {
+      pushToast('Dictation not supported on this browser');
       return;
     }
 
     navigator.vibrate?.(10);
     try {
-      recorderRef.current = await startRecording();
+      setDictationText('');
+      dictationRef.current = startDictation({ onResult: (t) => setDictationText(t) });
       setIsRecording(true);
-    } catch {
-      pushToast('Microphone access denied');
+    } catch (err) {
+      pushToast(err.message || 'Could not start dictation');
     }
   };
 
-  // Triple-tap on a title page: captures a fixed, centered, book-page-shaped
-  // (portrait) rectangle and uses the extracted text as the "currently
-  // logged" source title, tagged onto every passage saved from here on.
-  const handleTitleLogTripleTap = async () => {
+  // Triple-tap in title mode: read the title from the bracketed region.
+  const handleTitleCapture = async () => {
     navigator.vibrate?.([10, 40, 10, 40, 10]);
     const bounds = getTitleCaptureBounds();
-    // Shown immediately so the gesture feels acknowledged right away, even
-    // though we don't know the extraction result yet.
     setTitleCapture({ bounds, phase: 'capturing' });
 
     if (!videoRef.current || videoRef.current.readyState < 2) {
@@ -260,15 +334,37 @@ export default function CaptureView() {
       setTitleCapture(null);
       return;
     }
-
     const title = (result.title || '').trim();
     if (!title) {
       setTitleCapture(null);
       return;
     }
-    setCurrentSourceTitle(title);
-    // Only now does the big "Title Logged" confirmation appear and fade.
     setTitleCapture((prev) => (prev ? { ...prev, phase: 'logged' } : null));
+    applyTitle(title);
+  };
+
+  const handleTitleModeTap = (point) => {
+    const now = performance.now();
+    const tap = { time: now, x: point.x, y: point.y };
+    const recent = tapHistoryRef.current.filter((t) => now - t.time < TRIPLE_TAP_WINDOW_MS);
+    const closeToAll = recent.every(
+      (t) =>
+        Math.abs(t.x - tap.x) < TRIPLE_TAP_POSITION_THRESHOLD &&
+        Math.abs(t.y - tap.y) < TRIPLE_TAP_POSITION_THRESHOLD
+    );
+
+    clearTimeout(titleTapTimerRef.current);
+    if (recent.length === 2 && closeToAll) {
+      tapHistoryRef.current = [];
+      handleTitleCapture();
+      return;
+    }
+    tapHistoryRef.current = closeToAll ? [...recent, tap] : [tap];
+    // A lone tap that doesn't become a triple-tap opens the type-a-title field.
+    titleTapTimerRef.current = setTimeout(() => {
+      tapHistoryRef.current = [];
+      setTitleTyping(true);
+    }, TRIPLE_TAP_WINDOW_MS);
   };
 
   const handleTouchStart = (e) => {
@@ -277,12 +373,13 @@ export default function CaptureView() {
     const point = normalizePoint(touch.clientX, touch.clientY, rect);
     startTimeRef.current = performance.now();
     touchPathRef.current = [{ ...point, t: 0 }];
-    setDragBounds({ min: point.y, max: point.y });
+    if (!titleMode) setDragBounds({ min: point.y, max: point.y });
     navigator.vibrate?.(10);
     if (!hintDismissed) dismissHint();
   };
 
   const handleTouchMove = (e) => {
+    if (titleMode) return;
     const touch = e.touches[0];
     const rect = containerRef.current.getBoundingClientRect();
     const point = normalizePoint(touch.clientX, touch.clientY, rect);
@@ -297,34 +394,22 @@ export default function CaptureView() {
 
     const path = touchPathRef.current;
     touchPathRef.current = [];
+    if (path.length === 0) return;
 
-    if (!isMeaningfulDrag(path)) {
-      const now = performance.now();
-      const tap = { time: now, x: path[0].x, y: path[0].y };
-      // Drop any prior taps too old to still combo with this one.
-      const recent = tapHistoryRef.current.filter((t) => now - t.time < TRIPLE_TAP_WINDOW_MS);
-      const closeToAll = recent.every(
-        (t) =>
-          Math.abs(t.x - tap.x) < TRIPLE_TAP_POSITION_THRESHOLD &&
-          Math.abs(t.y - tap.y) < TRIPLE_TAP_POSITION_THRESHOLD
-      );
-
-      if (recent.length === 2 && closeToAll) {
-        tapHistoryRef.current = [];
-        handleTitleLogTripleTap();
-      } else if (closeToAll) {
-        tapHistoryRef.current = [...recent, tap];
-      } else {
-        tapHistoryRef.current = [tap];
-      }
+    if (titleMode) {
+      // Only taps matter in title mode; ignore drags.
+      if (!isMeaningfulDrag(path)) handleTitleModeTap(path[0]);
       return;
     }
-    tapHistoryRef.current = [];
 
+    // Normal mode: only a real drag captures a passage; stray taps do nothing.
+    if (!isMeaningfulDrag(path)) return;
     if (!videoRef.current || videoRef.current.readyState < 2) return;
-
     performCapture(path);
   };
+
+  const cw = containerRef.current?.clientWidth ?? 0;
+  const ch = containerRef.current?.clientHeight ?? 0;
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-black">
@@ -345,25 +430,16 @@ export default function CaptureView() {
         onTouchEnd={handleTouchEnd}
       >
         {containerRef.current && dragBounds && (
-          <MarginTicks
-            yMin={dragBounds.min}
-            yMax={dragBounds.max}
-            containerHeight={containerRef.current.clientHeight}
-          />
+          <MarginTicks yMin={dragBounds.min} yMax={dragBounds.max} containerHeight={ch} />
         )}
 
         {containerRef.current && captureBounds && (
           <>
-            <MarginTicks
-              yMin={captureBounds.yMin}
-              yMax={captureBounds.yMax}
-              containerHeight={containerRef.current.clientHeight}
-              fading
-            />
+            <MarginTicks yMin={captureBounds.yMin} yMax={captureBounds.yMax} containerHeight={ch} fading />
             <CaptureFlash
               yMin={captureBounds.yMin}
               yMax={captureBounds.yMax}
-              containerHeight={containerRef.current.clientHeight}
+              containerHeight={ch}
               onDone={() => setCaptureBounds(null)}
             />
           </>
@@ -375,13 +451,25 @@ export default function CaptureView() {
             xMax={titleCapture.bounds.xMax}
             yMin={titleCapture.bounds.yMin}
             yMax={titleCapture.bounds.yMax}
-            containerWidth={containerRef.current.clientWidth}
-            containerHeight={containerRef.current.clientHeight}
+            containerWidth={cw}
+            containerHeight={ch}
             phase={titleCapture.phase}
             onDone={() => setTitleCapture(null)}
           />
         )}
       </div>
+
+      {containerRef.current && titleMode && !titleTyping && (
+        <TitleModeOverlay containerWidth={cw} containerHeight={ch} onCancel={exitTitleMode} />
+      )}
+
+      {titleTyping && (
+        <TitleTypingOverlay
+          initialValue={titleMode?.target === 'passage' ? '' : currentTitle ?? ''}
+          onSubmit={applyTitle}
+          onCancel={() => setTitleTyping(false)}
+        />
+      )}
 
       {cameraError && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-ink p-6 text-center text-parchment">
@@ -392,21 +480,44 @@ export default function CaptureView() {
         </div>
       )}
 
-      {!hintDismissed && !cameraError && (
-        <div className="absolute top-6 left-1/2 flex -translate-x-1/2 flex-col items-center gap-2 text-center">
-          <div className="rounded-full bg-black/60 px-4 py-2 text-sm text-parchment">
-            Drag down over text to capture
-          </div>
-          <div className="rounded-full bg-black/60 px-4 py-2 text-xs text-parchment/80">
-            Don't forget to log the title of the text to help you find it later :)
-          </div>
+      {/* Title indicator (top) — current working title, or a prompt to set one. */}
+      {!cameraError && !titleMode && (
+        <button
+          type="button"
+          onClick={() => setTitleMode({ target: 'global' })}
+          className="absolute top-4 left-1/2 z-20 max-w-[80%] -translate-x-1/2 truncate rounded-full bg-black/50 px-4 py-1.5 text-sm text-parchment"
+        >
+          {currentTitle ? (
+            <span className="text-parchment">{currentTitle}</span>
+          ) : (
+            <span className="text-parchment/50">No title ascribed</span>
+          )}
+        </button>
+      )}
+
+      {!hintDismissed && !cameraError && !titleMode && (
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 rounded-full bg-black/50 px-4 py-2 text-xs text-parchment/70">
+          Drag down over text to capture
         </div>
+      )}
+
+      {/* Live dictation transcript preview. */}
+      {isRecording && (
+        <div className="absolute bottom-28 left-1/2 z-20 max-w-[80%] -translate-x-1/2 rounded-lg bg-black/70 px-4 py-2 text-center text-sm text-parchment">
+          {dictationText || (titleMode ? 'Speak the title…' : 'Listening…')}
+        </div>
+      )}
+
+      {/* Page indicator (bottom) — hidden in title mode. */}
+      {!cameraError && !titleMode && (
+        <PageIndicator page={currentPage} onChange={updatePageState} />
       )}
 
       {!cameraError && (
         <VoiceRecordButton
           isRecording={isRecording}
-          disabled={!hasPassages}
+          dictation={!!titleMode}
+          disabled={!titleMode && !hasPassages}
           onToggle={handleRecordToggle}
         />
       )}
