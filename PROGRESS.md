@@ -5,7 +5,7 @@
 - [x] Phase 2 — Capture view (camera + touch-drag selection) — real-phone verified, see note
 - [x] Phase 3 — Wire capture to Claude + instant save + undo (+ title/page context)
 - [x] Phase 4 — Continuation detection
-- [ ] Phase 5 — Voice notes
+- [x] Phase 5 — Voice notes — needs real-mic verification, see note
 - [ ] Phase 6 — Library view
 - [ ] Phase 7 — Chat view
 - [ ] Phase 8 — Polish pass
@@ -101,3 +101,9 @@ Found and fixed a real bug while verifying: the merged entry's `mergedFromIds` w
 - Re-ran a full real drag-capture through the actual UI afterward to confirm no regression from wiring this in.
 
 **Known simplification, called out explicitly in the spec as acceptable:** the existing Undo button's `deletePassage(id)` doesn't know how to "un-merge" — if a passage gets auto-merged shortly after its toast appears and the user taps Undo, it silently no-ops (the id it was pointing at no longer exists post-merge) rather than restoring both originals. The spec explicitly says this case "doesn't need to be perfect," so it wasn't implemented; flagging in case it comes up in real use.
+
+**Phase 5 (2026-07-06):** New `lib/audio.js` (`startRecording()` — wraps `MediaRecorder`, resolves a base64 data URL + mime type once stopped) and `VoiceRecordButton.jsx` (persistent circular button, bottom-right of Capture, disabled until at least one passage exists). Wired into `CaptureView.jsx`: tapping starts recording; tapping again stops it and attaches the result to `getPassages()[0]` — read *at stop time*, not start time, so a passage captured mid-recording correctly "wins" over whatever was most recent when recording began, per spec. Disabled state covers "no passage exists yet" (chose disable over a toast, per spec's explicit either/or); a defensive toast fallback ("Capture something first") is also wired in case the handler is ever reached anyway. Mic-permission denial shows a toast rather than crashing.
+
+**Verified against real recording (not mocked)** — real `MediaRecorder` + `AudioContext`-generated audio through the actual button clicks: confirmed the button is disabled with zero passages and enables after a capture; confirmed a real recording attaches a valid, *decodable* `audio/webm;codecs=opus` data URL to the correct passage (loaded it through a real `<audio>` element and confirmed `onloadedmetadata` fires without error — actually playable, not just present); and specifically verified the stop-time-not-start-time attachment rule by starting a recording, capturing a *second* passage while still recording, then stopping — confirmed the audio landed on the newer passage, not the one that existed when recording began.
+
+**Needs your real-device judgment:** verified with a synthetic oscillator tone (headless environment has no real microphone), not an actual human voice. Please try recording a real note on your phone and confirm playback sounds right — audio is inherently the one thing I can't fully validate without a real mic and speaker.

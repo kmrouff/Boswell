@@ -4,6 +4,7 @@ import MarginTicks from './MarginTicks.jsx';
 import CaptureFlash from './CaptureFlash.jsx';
 import TitleLoggedFlash from './TitleLoggedFlash.jsx';
 import UndoToast from './UndoToast.jsx';
+import VoiceRecordButton from './VoiceRecordButton.jsx';
 import {
   normalizePoint,
   isMeaningfulDrag,
@@ -14,8 +15,16 @@ import {
   VISUAL_BUFFER_RATIO,
 } from '../lib/capture.js';
 import { extractPassage, extractTitle } from '../lib/claude.js';
-import { savePassage, deletePassage, getCurrentSourceTitle, setCurrentSourceTitle } from '../lib/storage.js';
+import {
+  savePassage,
+  deletePassage,
+  getPassages,
+  updatePassage,
+  getCurrentSourceTitle,
+  setCurrentSourceTitle,
+} from '../lib/storage.js';
 import { maybeMergeWithPrevious } from '../lib/continuation.js';
+import { startRecording } from '../lib/audio.js';
 
 const HINT_DISMISSED_KEY = 'capture_hint_dismissed';
 
@@ -32,12 +41,15 @@ export default function CaptureView() {
   const touchPathRef = useRef([]);
   const startTimeRef = useRef(0);
   const tapHistoryRef = useRef([]); // most recent taps (oldest first), max length 2
+  const recorderRef = useRef(null);
 
   const [cameraError, setCameraError] = useState(null);
   const [dragBounds, setDragBounds] = useState(null);
   const [captureBounds, setCaptureBounds] = useState(null);
   const [titleCapture, setTitleCapture] = useState(null); // { bounds, phase: 'capturing' | 'logged' }
   const [toasts, setToasts] = useState([]);
+  const [isRecording, setIsRecording] = useState(false);
+  const [hasPassages, setHasPassages] = useState(() => getPassages().length > 0);
   const [hintDismissed, setHintDismissed] = useState(
     () => localStorage.getItem(HINT_DISMISSED_KEY) === 'true'
   );
@@ -117,12 +129,46 @@ export default function CaptureView() {
     };
 
     savePassage(passage);
+    setHasPassages(true);
     window.dispatchEvent(new CustomEvent('passage-saved', { detail: { id: passage.id } }));
     pushToast('Captured', () => deletePassage(passage.id));
 
     // Fire-and-forget: entirely invisible to the user either way, per spec —
     // no toast, no prompt, whether it merges or not.
     maybeMergeWithPrevious(passage);
+  };
+
+  // Attaches to whichever passage was most recently saved at the moment
+  // recording *stops* (not started) — if a new passage lands mid-recording,
+  // the note follows the newer one, per spec.
+  const handleRecordToggle = async () => {
+    if (isRecording) {
+      navigator.vibrate?.(10);
+      setIsRecording(false);
+      const controller = recorderRef.current;
+      recorderRef.current = null;
+      controller?.stop();
+      const result = await controller?.stopPromise;
+      if (!result) return;
+
+      const latest = getPassages()[0];
+      if (!latest) return; // nothing to attach to anymore — graceful no-op
+      updatePassage(latest.id, { audioNote: result.dataUrl, audioTranscript: null });
+      return;
+    }
+
+    if (!hasPassages) {
+      pushToast('Capture something first');
+      return;
+    }
+
+    navigator.vibrate?.(10);
+    try {
+      recorderRef.current = await startRecording();
+      setIsRecording(true);
+    } catch {
+      pushToast('Microphone access denied');
+    }
   };
 
   // Triple-tap on a title page: captures a fixed, centered, book-page-shaped
@@ -286,6 +332,14 @@ export default function CaptureView() {
             Don't forget to log the title of the text to help you find it later :)
           </div>
         </div>
+      )}
+
+      {!cameraError && (
+        <VoiceRecordButton
+          isRecording={isRecording}
+          disabled={!hasPassages}
+          onToggle={handleRecordToggle}
+        />
       )}
 
       <UndoToast toasts={toasts} onDismiss={removeToast} />
