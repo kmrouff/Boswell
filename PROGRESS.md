@@ -6,7 +6,7 @@
 - [x] Phase 3 — Wire capture to Claude + instant save + undo (+ title/page context)
 - [x] Phase 4 — Continuation detection
 - [x] Phase 5 — Voice notes — needs real-mic verification, see note
-- [ ] Phase 6 — Library view
+- [x] Phase 6 — Library view
 - [ ] Phase 7 — Chat view
 - [ ] Phase 8 — Polish pass
 
@@ -107,3 +107,11 @@ Found and fixed a real bug while verifying: the merged entry's `mergedFromIds` w
 **Verified against real recording (not mocked)** — real `MediaRecorder` + `AudioContext`-generated audio through the actual button clicks: confirmed the button is disabled with zero passages and enables after a capture; confirmed a real recording attaches a valid, *decodable* `audio/webm;codecs=opus` data URL to the correct passage (loaded it through a real `<audio>` element and confirmed `onloadedmetadata` fires without error — actually playable, not just present); and specifically verified the stop-time-not-start-time attachment rule by starting a recording, capturing a *second* passage while still recording, then stopping — confirmed the audio landed on the newer passage, not the one that existed when recording began.
 
 **Needs your real-device judgment:** verified with a synthetic oscillator tone (headless environment has no real microphone), not an actual human voice. Please try recording a real note on your phone and confirm playback sounds right — audio is inherently the one thing I can't fully validate without a real mic and speaker.
+
+**Scope change — drop image storage entirely (user-requested):** the user pointed out that storing a base64 image thumbnail per passage (as the v3 data model specified) is unnecessary weight, since Claude already converts everything to text — that's the whole point of OCR. Removed `imageThumb` from the data model entirely: deleted `createThumbnail` from `lib/capture.js` (dead code), stopped generating/attaching it in `CaptureView.jsx`'s `performCapture`, and dropped the `imageThumb: prevPassage.imageThumb` line from the merge logic in `lib/continuation.js`. This is a deliberate deviation from the original spec's data model, not an oversight — passages now carry only text + metadata + optional audio, no images at all. Verified via a real capture that `imageThumb` no longer appears on saved passage objects.
+
+Also lowered `VoiceRecordButton` from `bottom-24` to `bottom-12` per user feedback (closer to natural thumb reach) — noted as a first pass, more visual polish to come later.
+
+**Phase 6 (2026-07-06):** New `PassageCard.jsx` (tap-to-expand/collapse with `line-clamp-3` when collapsed, metadata line showing `sourceTitle`/page/`context`, delete button, and — per the user's framing — a voice note renders as an inline `<audio>` control directly on the card, like an annotation, not a separate list item) and rewritten `LibraryView.jsx` (list newest-first, empty state, listens for `passage-saved` to refresh in case an extraction resolves while the view is already mounted). Merged passages render with zero special treatment — no badge, no visual distinction — exactly per spec's "merging should be invisible in the UI."
+
+**Verified in the browser** with seeded realistic data covering every case: empty state, a short one-line passage, a long passage that actually truncates and correctly expands to show full text on tap, a passage with a real playable audio note attached, and a merged passage (confirmed rendering identically to a normal entry, no merge indicator). Delete verified to update both storage and the UI in sync.

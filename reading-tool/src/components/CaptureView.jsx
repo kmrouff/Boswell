@@ -10,7 +10,6 @@ import {
   isMeaningfulDrag,
   computeSelectionBounds,
   cropVideoFrame,
-  createThumbnail,
   getTitleCaptureBounds,
   VISUAL_BUFFER_RATIO,
 } from '../lib/capture.js';
@@ -109,8 +108,6 @@ export default function CaptureView() {
       return;
     }
 
-    const imageThumb = await createThumbnail(dataUrl).catch(() => null);
-
     const passage = {
       id: uuidv4(),
       capturedAt: new Date().toISOString(),
@@ -123,7 +120,6 @@ export default function CaptureView() {
       selectionBounds,
       isMerged: false,
       mergedFromIds: [],
-      imageThumb,
       audioNote: null,
       audioTranscript: null,
     };

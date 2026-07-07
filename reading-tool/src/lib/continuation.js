@@ -57,7 +57,6 @@ export const maybeMergeWithPrevious = async (newPassage) => {
       // passage, not nullish — so this has to branch on isMerged, not on
       // mergedFromIds being empty, or a fresh passage's own id gets dropped.
       mergedFromIds: [...(prevPassage.isMerged ? prevPassage.mergedFromIds : [prevPassage.id]), newPassage.id],
-      imageThumb: prevPassage.imageThumb,
       audioNote: prevPassage.audioNote ?? newPassage.audioNote ?? null,
       audioTranscript: prevPassage.audioTranscript ?? newPassage.audioTranscript ?? null,
     };
