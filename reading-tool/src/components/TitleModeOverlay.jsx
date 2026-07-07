@@ -24,14 +24,14 @@ export default function TitleModeOverlay({ containerWidth, containerHeight, onCa
         <div className={`${cornerStyle} border-r-2 border-b-2`} style={{ right: 0, bottom: 0, width: bracket, height: bracket }} />
       </div>
 
-      <div className="absolute top-6 left-1/2 -translate-x-1/2 rounded-full bg-amber-300/90 px-4 py-2 text-sm font-medium text-ink">
-        Triple-tap to capture title
+      <div className="absolute top-6 left-1/2 max-w-[60%] -translate-x-1/2 rounded-2xl bg-amber-300/90 px-4 py-2 text-center text-sm font-medium text-ink">
+        Triple-tap to capture, single tap to type
       </div>
 
       <button
         type="button"
         onClick={onCancel}
-        className="pointer-events-auto absolute top-5 right-4 rounded-full bg-black/60 px-3 py-1.5 text-sm text-parchment"
+        className="pointer-events-auto absolute top-6 right-4 rounded-full bg-black/60 px-4 py-2 text-sm text-parchment"
       >
         Cancel
       </button>

@@ -16,7 +16,7 @@ export default function VoiceRecordButton({ isRecording, disabled, dictation, on
           ? isRecording ? 'Stop dictating title' : 'Dictate title'
           : isRecording ? 'Stop recording' : 'Record voice note'
       }
-      className={`absolute bottom-12 right-4 z-20 flex h-14 w-14 items-center justify-center rounded-full border-2 transition-colors ${
+      className={`absolute bottom-7 right-6 z-20 flex h-14 w-14 items-center justify-center rounded-full border-2 transition-colors ${
         disabled
           ? 'border-parchment/15 bg-black/40 opacity-40'
           : isRecording
