@@ -11,12 +11,16 @@ import {
   computeSelectionBounds,
   cropVideoFrame,
   getTitleCaptureBounds,
+  rawBoundsOf,
+  bufferOverlapChop,
+  cropImageRegion,
   VISUAL_BUFFER_RATIO,
 } from '../lib/capture.js';
 import { extractPassage, extractTitle } from '../lib/claude.js';
 import {
   savePassage,
   deletePassage,
+  getPassage,
   getPassages,
   updatePassage,
   getCurrentSourceTitle,
@@ -34,6 +38,12 @@ const HINT_DISMISSED_KEY = 'capture_hint_dismissed';
 const TRIPLE_TAP_WINDOW_MS = 400;
 const TRIPLE_TAP_POSITION_THRESHOLD = 0.08;
 
+// How long a capture stays "recent" for buffer-overlap de-duplication. The
+// chop assumes the camera hasn't moved between the two captures (a static
+// reading view), so it only compares against captures made moments ago.
+const RECENT_CAPTURE_WINDOW_MS = 20000;
+const MAX_RECENT_CAPTURES = 4;
+
 export default function CaptureView() {
   const videoRef = useRef(null);
   const containerRef = useRef(null);
@@ -41,6 +51,9 @@ export default function CaptureView() {
   const startTimeRef = useRef(0);
   const tapHistoryRef = useRef([]); // most recent taps (oldest first), max length 2
   const recorderRef = useRef(null);
+  // Recent captures kept transiently in memory (not storage) for buffer-overlap
+  // de-duplication: { rawBounds, cropBounds, cropDataUrl, savedPromise, tMs }.
+  const recentCapturesRef = useRef([]);
 
   const [cameraError, setCameraError] = useState(null);
   const [dragBounds, setDragBounds] = useState(null);
@@ -89,21 +102,80 @@ export default function CaptureView() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
+  // Retroactively trims a previous capture's overlapping buffer once a later
+  // capture reveals where the two should meet, so the shared region isn't
+  // extracted into both passages. Re-crops the previous capture's retained
+  // image (no re-touching the camera) and re-extracts it. Fire-and-forget and
+  // fully guarded: any failure leaves the previous passage exactly as it was.
+  const reChopPrevious = (prev, chopLine, newIsLower) => {
+    prev.savedPromise.then(async (prevId) => {
+      if (!prevId) return; // previous never saved (extraction failed)
+      const current = getPassage(prevId);
+      if (!current) return; // deleted, or merged away into another entry
+      // new below prev → prev is the upper one → trim its bottom, and vice versa.
+      const newBounds = newIsLower
+        ? { ...current.selectionBounds, yMax: Math.min(current.selectionBounds.yMax, chopLine) }
+        : { ...current.selectionBounds, yMin: Math.max(current.selectionBounds.yMin, chopLine) };
+      try {
+        const recropped = await cropImageRegion(prev.cropDataUrl, prev.cropBounds, newBounds);
+        const res = await extractPassage(recropped);
+        if (res.error) return;
+        updatePassage(prevId, {
+          rawText: res.rawText,
+          refinedText: res.refinedText,
+          selectionBounds: newBounds,
+        });
+      } catch {
+        // Leave the previous passage as-is.
+      }
+    });
+  };
+
   // Async and non-blocking by design: the UI already returned to ready state
   // by the time this runs, and multiple of these can be in flight at once if
   // the user gestures again quickly — each resolves into its own passage.
   const performCapture = async (path) => {
-    const selectionBounds = computeSelectionBounds(path);
-    const dataUrl = cropVideoFrame(videoRef.current, selectionBounds);
+    const rawBounds = rawBoundsOf(path);
+    let cropBounds = computeSelectionBounds(path);
+
+    // De-duplicate buffer overlaps against recent captures on the same static
+    // view: chop this capture's colliding side, and schedule the previous
+    // capture to be re-trimmed on its side so neither double-captures the gap.
+    const now = performance.now();
+    recentCapturesRef.current = recentCapturesRef.current.filter(
+      (c) => now - c.tMs < RECENT_CAPTURE_WINDOW_MS
+    );
+    for (const prev of recentCapturesRef.current) {
+      const chop = bufferOverlapChop(prev.rawBounds, rawBounds);
+      if (!chop) continue;
+      const newIsLower = rawBounds.min > prev.rawBounds.min;
+      cropBounds = newIsLower
+        ? { ...cropBounds, yMin: Math.max(cropBounds.yMin, chop.chopLine) }
+        : { ...cropBounds, yMax: Math.min(cropBounds.yMax, chop.chopLine) };
+      reChopPrevious(prev, chop.chopLine, newIsLower);
+    }
+
+    const dataUrl = cropVideoFrame(videoRef.current, cropBounds);
     // Grab the active title now, not whenever extraction resolves, so a
     // title logged mid-flight doesn't retroactively relabel this passage.
     const sourceTitle = getCurrentSourceTitle();
 
     setCaptureBounds(computeSelectionBounds(path, VISUAL_BUFFER_RATIO));
 
+    // Register this capture as "recent" before extraction so a rapid next
+    // gesture can de-dup against it; savedPromise resolves to its id once
+    // saved (or null if extraction fails).
+    let resolveSaved;
+    const savedPromise = new Promise((r) => (resolveSaved = r));
+    recentCapturesRef.current = [
+      { rawBounds, cropBounds, cropDataUrl: dataUrl, savedPromise, tMs: now },
+      ...recentCapturesRef.current,
+    ].slice(0, MAX_RECENT_CAPTURES);
+
     const result = await extractPassage(dataUrl);
 
     if (result.error) {
+      resolveSaved(null);
       pushToast("Couldn't read that — try again");
       return;
     }
@@ -117,7 +189,7 @@ export default function CaptureView() {
       pageNumber: result.pageNumber ?? null,
       sourceTitle,
       touchPath: path,
-      selectionBounds,
+      selectionBounds: cropBounds,
       isMerged: false,
       mergedFromIds: [],
       audioNote: null,
@@ -125,6 +197,7 @@ export default function CaptureView() {
     };
 
     savePassage(passage);
+    resolveSaved(passage.id);
     setHasPassages(true);
     window.dispatchEvent(new CustomEvent('passage-saved', { detail: { id: passage.id } }));
     pushToast('Captured', () => deletePassage(passage.id));
