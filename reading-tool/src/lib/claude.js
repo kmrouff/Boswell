@@ -108,6 +108,49 @@ export const extractPassage = async (imageBase64) => {
   }
 };
 
+const TITLE_SYSTEM_PROMPT = `You are looking at a photo of a book/document title page or cover. Identify the title (and author, if visible).
+
+Respond ONLY with JSON, no markdown fences:
+{ "title": "the title, plus author if visible, as a short phrase" }
+
+If no clear title is visible:
+{ "error": "brief explanation" }`;
+
+// Lightweight, purpose-built title lookup — deliberately much smaller than
+// extractPassage's prompt/response (no rawText/refinedText/pageNumber/
+// confidence, smaller image, lower max_tokens) so the "log title" gesture
+// resolves noticeably faster than a full passage extraction would.
+export const extractTitle = async (imageBase64) => {
+  try {
+    const resized = await resizeImage(imageBase64, 768);
+    const { mediaType, data } = toMediaAndData(resized);
+
+    const response = await callClaude({
+      model: MODEL,
+      max_tokens: 150,
+      system: TITLE_SYSTEM_PROMPT,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: mediaType, data } },
+            { type: 'text', text: 'What is the title?' },
+          ],
+        },
+      ],
+    });
+
+    const text = response.content?.[0]?.text ?? '';
+    try {
+      return parseJsonResponse(text);
+    } catch {
+      return { error: `Failed to parse Claude response: ${text.slice(0, 200)}` };
+    }
+  } catch (err) {
+    return { error: err.message || 'Title extraction failed' };
+  }
+};
+
 // Checks whether newPassage is a direct textual continuation of previousPassage
 // (e.g. across a page break) and, if so, returns a merged passage.
 export const checkContinuation = async (previousPassage, newPassage) => {

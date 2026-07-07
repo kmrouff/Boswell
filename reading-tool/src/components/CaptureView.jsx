@@ -13,7 +13,7 @@ import {
   getTitleCaptureBounds,
   VISUAL_BUFFER_RATIO,
 } from '../lib/capture.js';
-import { extractPassage } from '../lib/claude.js';
+import { extractPassage, extractTitle } from '../lib/claude.js';
 import { savePassage, deletePassage, getCurrentSourceTitle, setCurrentSourceTitle } from '../lib/storage.js';
 
 const HINT_DISMISSED_KEY = 'capture_hint_dismissed';
@@ -135,13 +135,13 @@ export default function CaptureView() {
       return;
     }
     const dataUrl = cropVideoFrame(videoRef.current, bounds);
-    const result = await extractPassage(dataUrl);
+    const result = await extractTitle(dataUrl);
     if (result.error) {
       setTitleCapture(null);
       return;
     }
 
-    const title = (result.refinedText || result.rawText || '').trim();
+    const title = (result.title || '').trim();
     if (!title) {
       setTitleCapture(null);
       return;
