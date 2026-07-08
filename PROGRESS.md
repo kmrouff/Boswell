@@ -15,14 +15,20 @@
 
 ---
 
-**End of day — 2026-07-06.** Stopping for the night after Phase 3 + two rounds of real-device revisions. Everything is committed; working tree is clean.
+**End of day — 2026-07-06 (evening).** Phases 0–7 are complete and committed; working tree is clean. Only **Phase 8 — Polish pass** remains. The app is functionally end-to-end: capture passages by drag, auto-extract text + page, log titles (scan/type/dictate), auto-merge page-break continuations, de-duplicate overlapping-buffer captures, attach voice notes (transcribed to text), browse the Library (flat or grouped by title), and chat across everything with streaming + citations.
 
-**Where things stand:** Phases 0–3 are functionally complete and verified against the real Claude API. Phase 3 picked up extra scope beyond the original spec at the user's request: page-number extraction and a double-tap-and-hold "log title" gesture that tags subsequent passages with a source title (see the Phase 3 entries below for full detail).
+**Confirmed working on the real phone this session:** the triple-tap title flow, the title/page indicators, dictation (voice→text) — the user said "works great." The record-button position + title-mode Cancel alignment + hint text were polished per their feedback (commit b29d78a).
 
-**Pick up here tomorrow:**
-1. **Unconfirmed on-device**: the latest revision (2026-07-06) redesigned the "Title Logged" confirmation (bigger, translucent, slower fade, book-shaped capture rectangle) and added an explicit `video.play()` call to fix a native Play/Pause icon flash. None of this has been checked on the actual phone yet — start next session by asking the user how it looks/feels before moving on.
-2. If that's good, proceed to **Phase 4 — continuation detection** (heuristic pre-filter + `checkContinuation` merge logic across a page break), per `BUILD_PHASES_V3.md`.
-3. Known accepted limitations, not bugs (don't rediscover these): Claude's output content filter can occasionally block extraction on dark/explicit literary passages (handled gracefully, see Phase 1 note); this dev sandbox's headless browser throttles background-tab timers unpredictably, which made some gesture-timing tests flaky here even though the underlying logic is correct (see Phase 2/3 notes) — real phone testing doesn't have this problem.
+**Pick up here tomorrow — Phase 8 (polish pass), per `BUILD_PHASES_V3.md`:**
+1. Before starting, ask the user if anything felt off during real use — Phase 8 is largely tuning against real-device feel (tap-vs-drag threshold, triple-tap timing, continuation-merge 0.85/0.15 bounds), so their observations should drive it.
+2. Error-state coverage sweep: camera denied (done), mic/dictation unsupported (basic toast done), localStorage quota exceeded (NOT yet handled — spec calls for a warn + offer-to-delete flow), offline/network failure during chat (surfaces inline, ok).
+3. General mobile UX pass across several real capture attempts.
+
+**Known accepted limitations / gotchas (don't rediscover these as bugs):**
+- Claude's output content filter can occasionally block extraction on dark/explicit literary passages — handled gracefully as an `{error}` toast (Phase 1 note).
+- Web Speech API dictation reliability varies on iOS Safari — it worked for the user this session, but it's the one inherently device-dependent piece (Phase 5/annotation notes).
+- The dev sandbox's headless browser throttles background-tab timers unpredictably, which made some gesture/fade timing tests flaky here even though the logic is correct — real phone doesn't have this. When verifying timing-sensitive UI in the preview, prefer checking state/DOM directly over screenshotting a narrow animation window.
+- Buffer-overlap de-dup's backward re-extraction costs one extra API call per overlapping pair and updates the previous passage's text a couple seconds later (invisible during capture).
 
 **Phase 0 (2026-07-05):** Scaffolded `reading-tool/` with Vite + React (JS, no TS). Tailwind loaded via CDN `<script>` in `index.html` (per spec — not a PostCSS build step), with `ink`/`parchment` colors configured to match the palette. Three-view tab shell in `App.jsx` (Capture/Library/Chat), each view currently a placeholder component. `lib/storage.js` fully implemented (`getPassages`, `savePassage`, `deletePassage`, `getPassage`, `updatePassage`, `replacePassages`, `clearAllPassages`) and manually verified in the browser console against a dummy passage object matching the v3 data model — save/get/update/replace(merge)/delete all confirmed working via `localStorage`. `uuid` installed as a dependency for Phase 2+. Git repo initialized at the project root (`/Users/kevinrouff/Claude/Projects/AI Pen`) since none existed yet — this first commit covers everything, including the two spec docs. `.env.example` added; real `.env` is gitignored. No API calls made yet — that's Phase 1, and will need the 2-3 test images described in the spec dropped into `test-assets/` (currently empty).
 
