@@ -50,6 +50,7 @@ export const maybeMergeWithPrevious = async (newPassage) => {
       context: prevPassage.context,
       pageNumber: prevPassage.pageNumber,
       sourceTitle: prevPassage.sourceTitle,
+      sourceAuthor: prevPassage.sourceAuthor ?? newPassage.sourceAuthor ?? null,
       touchPath: [...(prevPassage.touchPath ?? []), ...(newPassage.touchPath ?? [])],
       selectionBounds: prevPassage.selectionBounds,
       isMerged: true,
@@ -57,6 +58,7 @@ export const maybeMergeWithPrevious = async (newPassage) => {
       // passage, not nullish — so this has to branch on isMerged, not on
       // mergedFromIds being empty, or a fresh passage's own id gets dropped.
       mergedFromIds: [...(prevPassage.isMerged ? prevPassage.mergedFromIds : [prevPassage.id]), newPassage.id],
+      priority: prevPassage.priority || newPassage.priority || false,
       audioNote: prevPassage.audioNote ?? newPassage.audioNote ?? null,
       audioTranscript: prevPassage.audioTranscript ?? newPassage.audioTranscript ?? null,
     };

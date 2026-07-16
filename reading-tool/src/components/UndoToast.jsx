@@ -35,7 +35,9 @@ export default function UndoToast({ toasts, onDismiss }) {
   if (toasts.length === 0) return null;
 
   return (
-    <div className="absolute inset-x-0 bottom-4 z-20 flex flex-col gap-2 px-4">
+    // Positioned above the record row (not bottom-4, which the page
+    // indicator now occupies) so "Captured" never collides with it.
+    <div className="absolute inset-x-0 bottom-[100px] z-20 flex flex-col items-center gap-2 px-4">
       {toasts.map((toast) => (
         <Toast key={toast.id} toast={toast} onDismiss={onDismiss} />
       ))}

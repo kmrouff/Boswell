@@ -3,14 +3,14 @@ import { getPassages } from '../lib/storage.js';
 import { chatWithPassages } from '../lib/claude.js';
 
 const SUGGESTIONS = [
-  'Summarize what I’ve saved so far',
-  'What themes connect these passages?',
-  'What was that bit about …?',
-  'Which passage should I revisit?',
+  { text: 'Summarize what I’ve saved so far', populateOnly: false },
+  { text: 'What themes connect these passages?', populateOnly: false },
+  { text: 'What was that bit about…?', populateOnly: true },
+  { text: 'Which passage should I revisit?', populateOnly: false },
 ];
 
-export default function ChatView() {
-  const [messages, setMessages] = useState([]); // { role, content }
+export default function ChatView({ onCiteJump }) {
+  const [messages, setMessages] = useState([]); // { role, content, citation? }
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [passageCount, setPassageCount] = useState(() => getPassages().length);
@@ -37,17 +37,24 @@ export default function ChatView() {
     setStreaming(true);
 
     try {
-      await chatWithPassages(
+      const { citation } = await chatWithPassages(
         nextMessages.map((m) => ({ role: m.role, content: m.content })),
         getPassages(),
-        (_delta, full) => {
+        (_delta, displayText) => {
           setMessages((prev) => {
             const copy = [...prev];
-            copy[copy.length - 1] = { role: 'assistant', content: full };
+            copy[copy.length - 1] = { role: 'assistant', content: displayText };
             return copy;
           });
         }
       );
+      if (citation) {
+        setMessages((prev) => {
+          const copy = [...prev];
+          copy[copy.length - 1] = { ...copy[copy.length - 1], citation };
+          return copy;
+        });
+      }
     } catch {
       setMessages((prev) => {
         const copy = [...prev];
@@ -67,48 +74,65 @@ export default function ChatView() {
     setMessages([]);
   };
 
+  const pickSuggestion = (s) => {
+    if (s.populateOnly) setInput('What was that bit about ');
+    else send(s.text);
+  };
+
   const showEmpty = messages.length === 0;
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex shrink-0 items-center justify-between border-b border-parchment/10 px-4 py-3">
-        <span className="text-sm text-parchment/60">
-          Chat over {passageCount} {passageCount === 1 ? 'passage' : 'passages'}
+      <header
+        className="flex shrink-0 items-baseline justify-between px-[18px] pt-[56px] pb-3.5"
+        style={{ borderBottom: '1px solid rgb(var(--fg) / .1)' }}
+      >
+        <span className="font-display text-[30px] leading-none" style={{ color: 'rgb(var(--fg))' }}>
+          Chat
+        </span>
+        <span className="font-serif text-[13px] italic" style={{ color: 'rgb(var(--fg) / .5)' }}>
+          over {passageCount} {passageCount === 1 ? 'passage' : 'passages'}
         </span>
         {messages.length > 0 && (
           <button
             type="button"
             onClick={clearChat}
             disabled={streaming}
-            className="text-xs text-parchment/50 underline disabled:opacity-40 hover:text-parchment/80"
+            className="ml-3 font-sans text-xs underline disabled:opacity-40"
+            style={{ color: 'rgb(var(--fg) / .5)' }}
           >
             Clear
           </button>
         )}
       </header>
 
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto p-[18px]">
         {showEmpty ? (
-          <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
+          <div className="flex h-full flex-col items-center justify-center gap-5 text-center">
             {passageCount === 0 ? (
               <>
-                <p className="text-lg text-parchment/70">Nothing to chat about yet</p>
-                <p className="max-w-xs text-sm text-parchment/40">
+                <p className="font-serif text-lg" style={{ color: 'rgb(var(--fg) / .7)' }}>
+                  Nothing to chat about yet
+                </p>
+                <p className="max-w-xs font-sans text-sm" style={{ color: 'rgb(var(--fg) / .4)' }}>
                   Capture a few passages first, then come back to ask questions across everything you’ve saved.
                 </p>
               </>
             ) : (
               <>
-                <p className="text-lg text-parchment/70">Ask about what you’ve read</p>
-                <div className="flex flex-col gap-2">
+                <div className="max-w-[260px] font-display text-[27px] leading-[1.15]" style={{ color: 'rgb(var(--fg) / .8)' }}>
+                  Ask about what you’ve read.
+                </div>
+                <div className="flex w-full flex-col gap-2.5">
                   {SUGGESTIONS.map((s) => (
                     <button
-                      key={s}
+                      key={s.text}
                       type="button"
-                      onClick={() => send(s)}
-                      className="rounded-full border border-parchment/20 px-4 py-2 text-sm text-parchment/80 hover:border-parchment/40"
+                      onClick={() => pickSuggestion(s)}
+                      className="min-h-11 rounded-2xl border-none px-4 py-3 text-left font-serif text-[15px] transition-transform duration-150 active:scale-[0.985]"
+                      style={{ background: 'rgb(var(--fg) / .06)', color: 'rgb(var(--fg) / .85)' }}
                     >
-                      {s}
+                      {s.text}
                     </button>
                   ))}
                 </div>
@@ -118,18 +142,42 @@ export default function ChatView() {
         ) : (
           <div className="flex flex-col gap-4">
             {messages.map((m, i) => (
-              <div
-                key={i}
-                className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}
-              >
+              <div key={i} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
                 <div
-                  className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-4 py-2 text-sm ${
+                  className="max-w-[88%] whitespace-pre-wrap font-serif text-[15px] leading-[1.55]"
+                  style={
                     m.role === 'user'
-                      ? 'bg-parchment text-ink'
-                      : 'border border-parchment/10 bg-parchment/5 text-parchment'
-                  }`}
+                      ? {
+                          background: 'rgb(var(--fill))',
+                          color: 'rgb(var(--on-fill))',
+                          borderRadius: '18px 18px 4px 18px',
+                          padding: '11px 15px',
+                          maxWidth: '85%',
+                        }
+                      : {
+                          background: 'rgb(var(--fg) / .07)',
+                          color: 'rgb(var(--fg))',
+                          borderRadius: '18px 18px 18px 4px',
+                          padding: '13px 16px',
+                        }
+                  }
                 >
-                  {m.content || (streaming ? '…' : '')}
+                  <span>{m.content || (streaming && i === messages.length - 1 ? '…' : '')}</span>
+                  {m.citation && m.content && (!streaming || i !== messages.length - 1) && (
+                    <button
+                      type="button"
+                      onClick={() => onCiteJump?.(m.citation.id)}
+                      className="mt-2.5 flex items-center gap-1.5 rounded-full border font-sans text-xs font-semibold"
+                      style={{
+                        background: 'rgb(var(--acc) / .14)',
+                        borderColor: 'rgb(var(--acc) / .4)',
+                        color: 'rgb(var(--acc))',
+                        padding: '5px 12px',
+                      }}
+                    >
+                      ↗ {m.citation.label}
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
@@ -142,26 +190,22 @@ export default function ChatView() {
           e.preventDefault();
           send(input);
         }}
-        className="flex shrink-0 items-end gap-2 border-t border-parchment/10 p-3"
+        className="flex shrink-0 items-center gap-2.5 p-3"
+        style={{ borderTop: '1px solid rgb(var(--fg) / .1)' }}
       >
-        <textarea
+        <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              send(input);
-            }
-          }}
-          rows={1}
           placeholder={passageCount === 0 ? 'Capture something first…' : 'Ask about your passages…'}
           disabled={passageCount === 0}
-          className="max-h-32 min-h-[2.5rem] flex-1 resize-none rounded-2xl border border-parchment/20 bg-transparent px-4 py-2 text-sm text-parchment placeholder:text-parchment/30 focus:border-parchment/40 focus:outline-none disabled:opacity-40"
+          className="h-[46px] flex-1 rounded-full border px-4 font-sans text-sm focus:outline-none disabled:opacity-40"
+          style={{ background: 'rgb(var(--fg) / .04)', borderColor: 'rgb(var(--fg) / .2)', color: 'rgb(var(--fg))' }}
         />
         <button
           type="submit"
           disabled={streaming || !input.trim() || passageCount === 0}
-          className="h-10 shrink-0 rounded-full bg-parchment px-4 text-sm font-medium text-ink disabled:opacity-30"
+          className="h-[46px] shrink-0 rounded-full border-none px-5 font-sans text-sm font-bold disabled:opacity-30"
+          style={{ background: 'rgb(var(--acc))', color: 'rgb(var(--on-acc))' }}
         >
           Send
         </button>

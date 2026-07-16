@@ -1,5 +1,6 @@
 const DB_KEY = 'passages_db';
 const CURRENT_SOURCE_TITLE_KEY = 'current_source_title';
+const CURRENT_SOURCE_AUTHOR_KEY = 'current_source_author';
 const CURRENT_PAGE_KEY = 'current_page';
 
 export const getPassages = () => {
@@ -48,6 +49,15 @@ export const replacePassages = (idsToRemove, newPassage) => {
 
 export const clearAllPassages = () => writePassages([]);
 
+// Re-inserts a passage at a specific index — used to restore a deleted
+// passage to its original position for the Library undo snackbar, rather
+// than always landing back at the front like a fresh capture would.
+export const insertPassageAt = (index, passage) => {
+  const passages = getPassages();
+  passages.splice(Math.max(0, Math.min(index, passages.length)), 0, passage);
+  return writePassages(passages);
+};
+
 // The "currently logged" source title, set via the triple-tap gesture on
 // the title page. Attached to every passage saved while active — a plain
 // string tag for now, not a grouping entity (see PROGRESS.md).
@@ -55,6 +65,16 @@ export const getCurrentSourceTitle = () => localStorage.getItem(CURRENT_SOURCE_T
 
 export const setCurrentSourceTitle = (title) => {
   localStorage.setItem(CURRENT_SOURCE_TITLE_KEY, title);
+};
+
+// Companion to the source title — the author, captured/typed/dictated
+// alongside the title (see lib/claude.js extractTitle and the title-mode
+// overlays). Attached to every passage saved while active, same as title.
+export const getCurrentSourceAuthor = () => localStorage.getItem(CURRENT_SOURCE_AUTHOR_KEY) || null;
+
+export const setCurrentSourceAuthor = (author) => {
+  if (author == null || author === '') localStorage.removeItem(CURRENT_SOURCE_AUTHOR_KEY);
+  else localStorage.setItem(CURRENT_SOURCE_AUTHOR_KEY, author);
 };
 
 // The "working" page number shown on the capture screen — seeded by a one-shot

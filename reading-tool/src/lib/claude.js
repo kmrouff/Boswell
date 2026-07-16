@@ -108,10 +108,10 @@ export const extractPassage = async (imageBase64) => {
   }
 };
 
-const TITLE_SYSTEM_PROMPT = `You are looking at a photo of a book/document title page or cover. Identify the title (and author, if visible).
+const TITLE_SYSTEM_PROMPT = `You are looking at a photo of a book/document title page or cover. Identify the title, and separately the author if visible.
 
 Respond ONLY with JSON, no markdown fences:
-{ "title": "the title, plus author if visible, as a short phrase" }
+{ "title": "the title only, as a short phrase", "author": "the author's name, or null if not visible" }
 
 If no clear title is visible:
 { "error": "brief explanation" }`;
@@ -224,8 +224,28 @@ Respond ONLY with JSON, no markdown fences.`;
   }
 };
 
+// Machine-readable citation marker the model appends when one passage is
+// clearly its primary source. Stripped from everything the user sees (even
+// mid-stream, character by character, as it's being typed) and parsed only
+// after the stream completes to resolve which passage to jump to.
+const CITE_TOKEN = 'CITE_PASSAGE:';
+const CITE_TRAILING_RE = new RegExp(`\\n+${CITE_TOKEN}\\s*(\\d+)\\s*$`, 'i');
+
+// Removes a trailing citation marker — complete ("\nCITE_PASSAGE: 3") or
+// still being typed out token-by-token ("\nCITE_P", "\nCITE_PASSAGE:", ...)
+// — from the tail of `text`, so it's never visible to the user.
+const stripCitationForDisplay = (text) => {
+  const nlIdx = text.lastIndexOf('\n');
+  if (nlIdx === -1) return text;
+  const tail = text.slice(nlIdx).replace(/^\n+/, '');
+  const isPartialOrFullMarker = CITE_TOKEN.startsWith(tail) || new RegExp(`^${CITE_TOKEN}\\s*\\d*$`, 'i').test(tail);
+  return isPartialOrFullMarker ? text.slice(0, nlIdx).replace(/\s+$/, '') : text;
+};
+
 // Streams a chat response with all saved passages injected as context.
-// onToken is called with each incremental text chunk as it streams in.
+// onToken is called with each incremental (display-safe, marker-stripped)
+// full text as it streams in. Resolves to { text, citation }, where
+// citation is { id, label } for the passage the model cited, or null.
 export const chatWithPassages = async (messages, passagesArray, onToken) => {
   const passagesContext = passagesArray
     .map((p, i) => {
@@ -242,7 +262,11 @@ export const chatWithPassages = async (messages, passagesArray, onToken) => {
 
 ${passagesContext || '(no passages saved yet)'}
 
-Answer the user's questions using these passages as context. When relevant, quote or reference the specific passage(s) you're drawing from (by their title/page when available). Some passages may have a voice note the user recorded — treat it as their own annotation on that passage.`;
+Answer the user's questions using these passages as context. When relevant, quote or reference the specific passage(s) you're drawing from (by their title/page when available). Some passages may have a voice note the user recorded — treat it as their own annotation on that passage.
+
+If your answer draws primarily from one specific passage, end your response — after a blank line — with exactly:
+${CITE_TOKEN} <passage number>
+Only include this when a single passage is clearly the primary source; omit it entirely if you're synthesizing across several passages equally, or didn't cite anything specific.`;
 
   const res = await fetch(API_URL, {
     method: 'POST',
@@ -287,7 +311,7 @@ Answer the user's questions using these passages as context. When relevant, quot
         const event = JSON.parse(payload);
         if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
           fullText += event.delta.text;
-          onToken?.(event.delta.text, fullText);
+          onToken?.(event.delta.text, stripCitationForDisplay(fullText));
         }
       } catch {
         // ignore malformed SSE lines
@@ -295,7 +319,20 @@ Answer the user's questions using these passages as context. When relevant, quot
     }
   }
 
-  return fullText;
+  let citation = null;
+  const match = CITE_TRAILING_RE.exec(fullText);
+  if (match) {
+    const cited = passagesArray[Number(match[1]) - 1];
+    if (cited) {
+      const label =
+        [cited.sourceTitle, cited.pageNumber ? `p. ${cited.pageNumber}` : null].filter(Boolean).join(' · ') ||
+        cited.context ||
+        'Source';
+      citation = { id: cited.id, label };
+    }
+  }
+
+  return { text: stripCitationForDisplay(fullText), citation };
 };
 
 // Best-effort audio transcription for voice notes.

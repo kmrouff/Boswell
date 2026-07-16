@@ -28,6 +28,8 @@ import {
   updatePassage,
   getCurrentSourceTitle,
   setCurrentSourceTitle,
+  getCurrentSourceAuthor,
+  setCurrentSourceAuthor,
   getCurrentPage,
   setCurrentPage as persistCurrentPage,
 } from '../lib/storage.js';
@@ -35,6 +37,13 @@ import { maybeMergeWithPrevious } from '../lib/continuation.js';
 import { isDictationSupported, startDictation } from '../lib/dictation.js';
 
 const HINT_DISMISSED_KEY = 'capture_hint_dismissed';
+
+// Lightweight heuristic for a dictated title like "Solaris by Stanisław Lem" —
+// not a real NLP split, just a common-case convenience for spoken titles.
+const splitDictatedTitle = (text) => {
+  const match = /^(.+?)\s+by\s+(.+)$/i.exec(text.trim());
+  return match ? { title: match[1].trim(), author: match[2].trim() } : { title: text.trim(), author: null };
+};
 
 // Three taps in a row (within this window and this close in position) capture
 // the title while in title mode; a lone tap opens the type-a-title field.
@@ -70,6 +79,7 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
   const [dictationText, setDictationText] = useState('');
   const [hasPassages, setHasPassages] = useState(() => getPassages().length > 0);
   const [currentTitle, setCurrentTitle] = useState(() => getCurrentSourceTitle());
+  const [currentAuthor, setCurrentAuthor] = useState(() => getCurrentSourceAuthor());
   const [currentPage, setCurrentPageState] = useState(() => getCurrentPage());
   const [hintDismissed, setHintDismissed] = useState(
     () => localStorage.getItem(HINT_DISMISSED_KEY) === 'true'
@@ -152,16 +162,19 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
     setTitleMode(null);
   };
 
-  // Applies a captured/typed/dictated title to whatever the current title mode
-  // targets — the global "working title" (tags future captures) or a specific
-  // existing passage (from the Library "add title" flow) — then exits.
-  const applyTitle = (title) => {
+  // Applies a captured/typed/dictated title (+ optional author) to whatever
+  // the current title mode targets — the global "working title" (tags future
+  // captures) or a specific existing passage (from the Library "add title"
+  // flow) — then exits.
+  const applyTitle = (title, author = null) => {
     if (titleMode?.target === 'passage') {
-      updatePassage(titleMode.passageId, { sourceTitle: title });
+      updatePassage(titleMode.passageId, { sourceTitle: title, sourceAuthor: author });
       window.dispatchEvent(new CustomEvent('passage-saved', { detail: { id: titleMode.passageId } }));
     } else {
       setCurrentSourceTitle(title);
+      setCurrentSourceAuthor(author);
       setCurrentTitle(title);
+      setCurrentAuthor(author);
     }
     clearTimeout(titleTapTimerRef.current);
     tapHistoryRef.current = [];
@@ -218,6 +231,7 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
 
     const dataUrl = cropVideoFrame(videoRef.current, cropBounds);
     const sourceTitle = getCurrentSourceTitle();
+    const sourceAuthor = getCurrentSourceAuthor();
     const workingPage = getCurrentPage();
 
     setCaptureBounds(computeSelectionBounds(path, VISUAL_BUFFER_RATIO));
@@ -249,10 +263,12 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
       context: result.context,
       pageNumber: result.pageNumber ?? workingPage ?? null,
       sourceTitle,
+      sourceAuthor,
       touchPath: path,
       selectionBounds: cropBounds,
       isMerged: false,
       mergedFromIds: [],
+      priority: false,
       audioNote: null,
       audioTranscript: null,
     };
@@ -286,8 +302,12 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
       setDictationText('');
 
       if (titleMode) {
-        if (transcript) applyTitle(transcript);
-        else exitTitleMode();
+        if (transcript) {
+          const { title, author } = splitDictatedTitle(transcript);
+          applyTitle(title, author);
+        } else {
+          exitTitleMode();
+        }
         return;
       }
 
@@ -340,7 +360,7 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
       return;
     }
     setTitleCapture((prev) => (prev ? { ...prev, phase: 'logged' } : null));
-    applyTitle(title);
+    applyTitle(title, result.author || null);
   };
 
   const handleTitleModeTap = (point) => {
@@ -466,6 +486,7 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
       {titleTyping && (
         <TitleTypingOverlay
           initialValue={titleMode?.target === 'passage' ? '' : currentTitle ?? ''}
+          initialAuthor={titleMode?.target === 'passage' ? '' : currentAuthor ?? ''}
           onSubmit={applyTitle}
           onCancel={() => setTitleTyping(false)}
         />
@@ -490,7 +511,7 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
           {currentTitle ? (
             <span className="text-parchment">{currentTitle}</span>
           ) : (
-            <span className="text-parchment/50">No title ascribed</span>
+            <span className="text-parchment/50">＋ Tap to add title</span>
           )}
         </button>
       )}
