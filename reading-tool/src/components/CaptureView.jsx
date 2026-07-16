@@ -22,7 +22,6 @@ import {
 import { extractPassage, extractTitle, extractPageNumber } from '../lib/claude.js';
 import {
   savePassage,
-  deletePassage,
   getPassage,
   getPassages,
   updatePassage,
@@ -62,6 +61,14 @@ const MAX_RECENT_CAPTURES = 4;
 // of the "Free up space" toast action.
 const QUOTA_FREE_COUNT = 20;
 
+// How long the record button stays active after a capture, inviting a voice
+// note before it's assumed the passage is done (no audio). A recording that's
+// actually in progress isn't subject to this — it only gates *starting* one.
+const AUDIO_WINDOW_MS = 7000;
+
+// How long the first-use hint stays on screen before fading on its own.
+const HINT_DISPLAY_MS = 3500;
+
 export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
   const videoRef = useRef(null);
   const containerRef = useRef(null);
@@ -73,6 +80,10 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
   // Recent captures kept transiently in memory (not storage) for buffer-overlap
   // de-duplication: { rawBounds, cropBounds, cropDataUrl, savedPromise, tMs }.
   const recentCapturesRef = useRef([]);
+  // Mirrors isRecording for reads inside performCapture, which is async and
+  // can otherwise close over a stale value from before an await resolved.
+  const isRecordingRef = useRef(false);
+  const audioWindowTimerRef = useRef(null);
 
   const [cameraError, setCameraError] = useState(null);
   const [dragBounds, setDragBounds] = useState(null);
@@ -83,7 +94,10 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
   const [toasts, setToasts] = useState([]);
   const [isRecording, setIsRecording] = useState(false);
   const [dictationText, setDictationText] = useState('');
-  const [hasPassages, setHasPassages] = useState(() => getPassages().length > 0);
+  // Open for AUDIO_WINDOW_MS after a capture (indefinitely while actually
+  // recording) — gates whether the record button is active, and whether the
+  // Library nav badge is showing. See openAudioWindow below.
+  const [audioWindowOpen, setAudioWindowOpen] = useState(false);
   const [currentTitle, setCurrentTitle] = useState(() => getCurrentSourceTitle());
   const [currentAuthor, setCurrentAuthor] = useState(() => getCurrentSourceAuthor());
   const [currentPage, setCurrentPageState] = useState(() => getCurrentPage());
@@ -142,8 +156,37 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
     setHintDismissed(true);
   };
 
+  // The hint is explanatory text, not a control — it fades on its own after a
+  // few seconds rather than waiting to be dismissed by touch.
+  useEffect(() => {
+    if (localStorage.getItem(HINT_DISMISSED_KEY) === 'true') return;
+    const t = setTimeout(dismissHint, HINT_DISPLAY_MS);
+    return () => clearTimeout(t);
+  }, []);
+
   const pushToast = (message, onUndo, opts = {}) => {
     setToasts((prev) => [...prev, { id: uuidv4(), message, onUndo, ...opts }]);
+  };
+
+  // Opens (or extends) the record button's active window. Called on every
+  // successful capture — if one arrives while a recording is already under
+  // way, it just re-affirms the window is open without starting a new
+  // auto-close countdown (that would risk cutting off an active recording).
+  const openAudioWindow = () => {
+    clearTimeout(audioWindowTimerRef.current);
+    setAudioWindowOpen(true);
+    window.dispatchEvent(new CustomEvent('audio-window-open'));
+    if (isRecordingRef.current) return;
+    audioWindowTimerRef.current = setTimeout(() => {
+      setAudioWindowOpen(false);
+      window.dispatchEvent(new CustomEvent('audio-window-close'));
+    }, AUDIO_WINDOW_MS);
+  };
+
+  const closeAudioWindow = () => {
+    clearTimeout(audioWindowTimerRef.current);
+    setAudioWindowOpen(false);
+    window.dispatchEvent(new CustomEvent('audio-window-close'));
   };
 
   const removeToast = (id) => {
@@ -292,9 +335,8 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
             const retry = savePassage(passage);
             if (retry.ok) {
               resolveSaved(passage.id);
-              setHasPassages(true);
               window.dispatchEvent(new CustomEvent('passage-saved', { detail: { id: passage.id } }));
-              pushToast('Captured', () => deletePassage(passage.id));
+              openAudioWindow();
               maybeMergeWithPrevious(passage);
             } else {
               resolveSaved(null);
@@ -311,9 +353,8 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
     }
 
     resolveSaved(passage.id);
-    setHasPassages(true);
     window.dispatchEvent(new CustomEvent('passage-saved', { detail: { id: passage.id } }));
-    pushToast('Captured', () => deletePassage(passage.id));
+    openAudioWindow();
 
     maybeMergeWithPrevious(passage);
   };
@@ -327,6 +368,7 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
       const controller = dictationRef.current;
       dictationRef.current = null;
       setIsRecording(false);
+      isRecordingRef.current = false;
       controller?.stop();
       let transcript = '';
       try {
@@ -347,6 +389,10 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
         return;
       }
 
+      // Whatever passage is newest right now "wins" the note — if another
+      // drag happened while this recording was running, it's that one, not
+      // whatever was newest when recording started.
+      closeAudioWindow();
       if (!transcript) return;
       const latest = getPassages()[0];
       if (!latest) return; // nothing to attach to anymore
@@ -355,7 +401,7 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
       return;
     }
 
-    if (!titleMode && !hasPassages) {
+    if (!titleMode && !audioWindowOpen) {
       pushToast('Capture something first');
       return;
     }
@@ -369,6 +415,8 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
       setDictationText('');
       dictationRef.current = startDictation({ onResult: (t) => setDictationText(t) });
       setIsRecording(true);
+      isRecordingRef.current = true;
+      clearTimeout(audioWindowTimerRef.current);
     } catch (err) {
       pushToast(err.message || 'Could not start dictation');
     }
@@ -553,8 +601,13 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
       )}
 
       {!hintDismissed && !cameraError && !titleMode && (
-        <div className="absolute top-16 left-1/2 -translate-x-1/2 rounded-full bg-black/50 px-4 py-2 text-xs text-parchment/70">
-          Drag down over text to capture
+        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center px-12 text-center">
+          <span
+            className="font-serif text-base text-parchment/90"
+            style={{ textShadow: '0 1px 8px rgba(0,0,0,.8)' }}
+          >
+            Drag down over text to capture
+          </span>
         </div>
       )}
 
@@ -574,7 +627,7 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
         <VoiceRecordButton
           isRecording={isRecording}
           dictation={!!titleMode}
-          disabled={!titleMode && !hasPassages}
+          disabled={!titleMode && !audioWindowOpen && !isRecording}
           onToggle={handleRecordToggle}
         />
       )}

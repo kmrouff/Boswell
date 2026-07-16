@@ -133,8 +133,21 @@ export default function PassageCard({ passage, grouped, isOpen, onSwipeChange, o
   // Pointer-based horizontal swipe: engage only once |dx|>|dy| past a 6px
   // threshold (so vertical list scroll still works), lock to that axis for
   // the gesture, and suppress the card's expand-tap if a drag occurred.
+  //
+  // Pointer capture is grabbed immediately on pointerdown (not deferred to
+  // axis-lock time) — a fast real-finger swipe can otherwise carry the touch
+  // point outside the card's bounds before the 6px threshold is even
+  // crossed, and without capture already in place the browser can fail to
+  // deliver the follow-up move/up events to this element at all, leaving
+  // the card stuck mid-drag. Capturing early doesn't block native vertical
+  // scroll — that's governed by touch-action, not pointer capture.
   const handlePointerDown = (e) => {
     dragStateRef.current = { x: e.clientX, y: e.clientY, axis: null };
+    try {
+      e.currentTarget.setPointerCapture?.(e.pointerId);
+    } catch {
+      // Throws on synthetic/edge pointer sequences — safe to ignore.
+    }
   };
   const handlePointerMove = (e) => {
     const st = dragStateRef.current;
@@ -144,13 +157,6 @@ export default function PassageCard({ passage, grouped, isOpen, onSwipeChange, o
     if (!st.axis) {
       if (Math.abs(dx) > 6 || Math.abs(dy) > 6) {
         st.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
-        if (st.axis === 'x') {
-          try {
-            e.currentTarget.setPointerCapture?.(e.pointerId);
-          } catch {
-            // Throws on synthetic/edge pointer sequences — safe to ignore.
-          }
-        }
       } else {
         return;
       }
@@ -185,12 +191,16 @@ export default function PassageCard({ passage, grouped, isOpen, onSwipeChange, o
     <div className="relative overflow-hidden" style={{ borderRadius: 'var(--radius)' }}>
       {/* action tray, revealed as the card slides left */}
       <div className="absolute inset-y-0 right-0 flex items-stretch">
+        {/* Flush against the tray's own left edge and extending well past the
+            max overdrag (OPEN_W + 24), so the heart color always fills the
+            frame with no seam, however far the card is dragged. */}
+        <div className="absolute inset-y-0" style={{ right: '100%', width: 400, background: heartTrayColor }} />
         <button
           type="button"
           onClick={togglePriority}
           aria-label="Prioritize"
           className="flex w-[74px] items-center justify-center border-none"
-          style={{ background: heartTrayColor, color: '#3a2e12', boxShadow: `-140px 0 0 0 ${heartTrayColor}` }}
+          style={{ background: heartTrayColor, color: '#3a2e12' }}
         >
           <HeartIcon filled={!!passage.priority} />
         </button>
@@ -211,6 +221,7 @@ export default function PassageCard({ passage, grouped, isOpen, onSwipeChange, o
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
+        onLostPointerCapture={handlePointerUp}
         className="relative border p-[18px]"
         style={{
           borderColor: 'rgb(var(--fg) / .1)',

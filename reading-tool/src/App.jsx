@@ -52,6 +52,9 @@ function App() {
 
   const [activeTab, setActiveTab] = useState('capture');
   const [libraryPulsing, setLibraryPulsing] = useState(false);
+  // A small persistent badge on the Library tab, on for as long as Capture's
+  // record button is in its post-capture "add a voice note?" window.
+  const [libraryDot, setLibraryDot] = useState(false);
   // A request from the Library to (re)set a passage's title, routed to the
   // Capture view's title mode: { passageId } or null.
   const [titleRequest, setTitleRequest] = useState(null);
@@ -65,8 +68,16 @@ function App() {
       setLibraryPulsing(true);
       setTimeout(() => setLibraryPulsing(false), LIBRARY_PULSE_MS);
     };
+    const onAudioWindowOpen = () => setLibraryDot(true);
+    const onAudioWindowClose = () => setLibraryDot(false);
     window.addEventListener('passage-saved', onPassageSaved);
-    return () => window.removeEventListener('passage-saved', onPassageSaved);
+    window.addEventListener('audio-window-open', onAudioWindowOpen);
+    window.addEventListener('audio-window-close', onAudioWindowClose);
+    return () => {
+      window.removeEventListener('passage-saved', onPassageSaved);
+      window.removeEventListener('audio-window-open', onAudioWindowOpen);
+      window.removeEventListener('audio-window-close', onAudioWindowClose);
+    };
   }, []);
 
   const requestTitleForPassage = (passageId) => {
@@ -106,7 +117,7 @@ function App() {
               key={id}
               type="button"
               onClick={() => setActiveTab(id)}
-              className="flex flex-1 flex-col items-center gap-1 border-none bg-transparent py-1.5 font-sans transition-transform duration-200"
+              className="relative flex flex-1 flex-col items-center gap-1 border-none bg-transparent py-1.5 font-sans transition-transform duration-200"
               style={{
                 color: active || pulsing ? 'rgb(var(--acc))' : 'rgb(var(--fg) / .4)',
                 transform: pulsing ? 'scale(1.1)' : 'scale(1)',
@@ -114,6 +125,12 @@ function App() {
             >
               {icon}
               <span className="text-[11px] font-semibold">{label}</span>
+              {id === 'library' && libraryDot && (
+                <span
+                  className="absolute h-2.5 w-2.5 rounded-full bg-amber-400"
+                  style={{ top: 2, left: 'calc(50% + 7px)', boxShadow: '0 0 0 2px var(--bg)' }}
+                />
+              )}
             </button>
           );
         })}

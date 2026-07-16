@@ -48,9 +48,13 @@ export default function PageIndicator({ page, onChange }) {
     setEditing(false);
   };
 
+  // bottom-[38px] centers this h-9 pill on the record button's own center
+  // (bottom-7 + half of its h-14), so the two sit on the same horizontal
+  // line at opposite sides of the screen rather than each floating at its
+  // own arbitrary height.
   if (typing) {
     return (
-      <div className="absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-full bg-black/70 px-3 py-1.5">
+      <div className="absolute bottom-[38px] left-6 z-20 flex h-9 items-center gap-2 rounded-full bg-black/70 px-3">
         <span className="text-xs text-parchment/60">Page</span>
         <input
           autoFocus
@@ -73,7 +77,7 @@ export default function PageIndicator({ page, onChange }) {
       onPointerUp={onPointerUp}
       onFocus={() => setEditing(true)}
       onBlur={() => setEditing(false)}
-      className={`absolute bottom-4 left-1/2 z-20 -translate-x-1/2 touch-none rounded-full px-3 py-1.5 text-xs transition-colors ${
+      className={`absolute bottom-[38px] left-6 z-20 flex h-9 touch-none items-center rounded-full px-3 text-xs transition-colors ${
         editing ? 'bg-black/70 text-parchment' : 'bg-black/40 text-parchment/50'
       }`}
     >
