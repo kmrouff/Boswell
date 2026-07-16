@@ -8,7 +8,9 @@
 - [x] Phase 5 — Voice notes — needs real-mic verification, see note
 - [x] Phase 6 — Library view
 - [x] Phase 7 — Chat view
-- [ ] Phase 8 — Polish pass
+- [ ] Phase 8 — Polish pass (in progress — Claude Design UI/UX assessment underway)
+- [ ] Phase 9 — Backend proxy + feedback/messenger system (deferred until Phase 8 design work lands)
+- [ ] Phase 10 — Deploy (Vercel, PWA manifest, IndexedDB migration if needed) (deferred, low priority until sharing is imminent)
 
 ## Notes
 (Claude Code: add a short note here after each phase — what was built, any deviations from spec, anything the user should know before the next session)
@@ -156,3 +158,30 @@ Library cards (`PassageCard.jsx`) redesigned:
 Also enriched the passage context injected into the chat system prompt (`lib/claude.js`): it now leads with `sourceTitle` + `pageNumber` (falling back to the old `context` guess only if no title), and includes any `audioTranscript` as the user's own annotation on that passage — so the assistant can cite by title/page and factor in voice notes.
 
 **Verified end-to-end against the real streaming API:** both empty states render correctly (input disabled with zero passages); a real question streamed a response that correctly synthesized across two seeded passages with quotes; multi-turn context works (a follow-up "which of the two ideas…" correctly referenced the prior turn); metadata injection works (asking "name the author and page" was answered correctly from the injected title/page); suggestion-click sends; Clear wipes the thread and restores suggestions. No console errors.
+
+---
+
+## Deferred backlog (2026-07-09) — tracked, not yet built
+
+Consolidating everything discussed post-Phase-7 so it doesn't get lost between sessions. Nothing below has been implemented — these are specced/agreed for later phases, deliberately held until the Claude Design UI/UX pass is finalized and folded into Phase 8.
+
+**Handed to Claude Design for UI/UX assessment:** repo pushed to `github.com/kmrouff/reading_tool` (private), connected via Claude Design's "Connect GitHub" (scoped to just this repo, not all repos). Design produced a self-contained mockup (`Reading Tool.dc.html`) covering swipe actions, collapsible title groups, a "search heart", a settings drawer, and theme tokens — but has read-only GitHub access, so can't commit directly. Agreed path: request its **developer handoff package** (structured spec + exact values + component-by-component change list) plus the raw `.dc.html` as a visual cross-reference, then implement it here myself against the real components — deliberately *not* using Design's "guided diffs" option, since diffs written by a tool without this codebase's full history/context (gesture thresholds, why triple-tap replaced hold, the buffer-overlap de-dup, etc.) risk looking plausible but subtly breaking. Waiting on the user to paste that package back.
+
+**Phase 9 — Backend proxy + feedback/messenger system**, once Design work lands:
+1. **Backend proxy** (Vercel serverless function, user already has a Vercel account): holds `ANTHROPIC_API_KEY` server-side; client calls the proxy instead of `api.anthropic.com` directly. This is a hard requirement before ever sharing a live link with anyone — right now the key is embedded in the client bundle, fine for solo local dev, unsafe the moment a URL is actually shared (anyone can read it out of dev tools).
+2. **In-app feedback/messenger, full spec as agreed with the user:**
+   - **Trigger:** a two-finger (or two-thumb) press-and-hold, anywhere in the app — deliberately *not* a labeled "Feedback" button, since a button is "a different instinct" than the fast/instinctive capture the user wants. (Note: this cannot be tied to the real OS screenshot gesture — websites have no visibility into that at all, confirmed not possible — so this is a new in-app gesture chosen to feel similarly fast/thoughtless, consistent with the app's existing gesture vocabulary of drag-to-capture and triple-tap-for-title.)
+   - **On trigger:** opens a capture UI offering a text box *or* voice recording — voice goes through the same dictation-to-text pattern already built (`lib/dictation.js`, Web Speech API), consistent with the project's "transcribe, don't store audio" decision (see Phase 3 revision 4 / annotation-overhaul notes above).
+   - **Also bundles a screen-view** of the current app state alongside the text/transcript (an in-app DOM capture, e.g. via `html2canvas` or similar — not a real OS screenshot).
+   - **Delivery destination: explicitly deferred** ("we'll figure out where later," per the user). Requires the backend proxy to exist regardless, since getting a message from a tester's phone to the user requires *something* server-side — a pure client-only web app cannot deliver a message to a specific person. Once the proxy exists, adding a `/api/feedback` endpoint alongside it is cheap. Options discussed, none chosen yet: forward to the user's email, post to a Slack/Discord webhook, or store in a small DB with a simple viewer page.
+
+**Phase 10 — Deploy, once the above is ready:**
+- Deploy the static Vite build to Vercel (or Netlify) for a real `https://` URL — replaces the current local-dev-server-over-WiFi workflow (self-signed cert, IP address that can silently change, terminal must stay running).
+- Add a web app manifest + icon so **"Add to Home Screen"** gives a proper app icon/launch experience on iOS — this part is low-risk and could be done anytime (doesn't touch app logic or conflict with the Design pass), just hasn't been requested yet.
+- **IndexedDB migration** — explicitly *not* urgent. Passages are text-only now (a few KB each), so localStorage's ~5MB cap is very unlikely to be hit during a friend-testing phase. Recommended to ship the cheaper **localStorage-quota-handling safety net** first (still an open Phase 8 item — warn + offer to delete old passages on quota error) rather than the full IndexedDB refactor. IndexedDB is a real cross-cutting change (localStorage is synchronous, IndexedDB is Promise-based, and most components read passages synchronously in `useState` initializers today) — worth doing eventually, but only once there's an actual signal it's needed (a real report of running low, or a decision to bring back richer per-passage data like images).
+
+**Also still open from earlier Phase 8 scoping**, not yet done:
+- localStorage quota-exceeded handling (warn + offer to delete old passages) — the one concrete unbuilt item from the original Phase 8 spec.
+- Wide-angle camera fallback behavior.
+- Tap-vs-drag threshold and continuation-merge (0.85/0.15) bounds — tune based on real usage feel once Design's changes are in and being tested.
+- General mobile UX sweep across several real capture attempts.
