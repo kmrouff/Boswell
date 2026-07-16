@@ -32,6 +32,8 @@ import {
   setCurrentSourceAuthor,
   getCurrentPage,
   setCurrentPage as persistCurrentPage,
+  isQuotaExceededError,
+  deleteOldestPassages,
 } from '../lib/storage.js';
 import { maybeMergeWithPrevious } from '../lib/continuation.js';
 import { isDictationSupported, startDictation } from '../lib/dictation.js';
@@ -55,6 +57,10 @@ const TRIPLE_TAP_POSITION_THRESHOLD = 0.08;
 // reading view), so it only compares against captures made moments ago.
 const RECENT_CAPTURE_WINDOW_MS = 20000;
 const MAX_RECENT_CAPTURES = 4;
+
+// How many of the oldest passages to drop when storage fills up, per tap
+// of the "Free up space" toast action.
+const QUOTA_FREE_COUNT = 20;
 
 export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
   const videoRef = useRef(null);
@@ -136,8 +142,8 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
     setHintDismissed(true);
   };
 
-  const pushToast = (message, onUndo) => {
-    setToasts((prev) => [...prev, { id: uuidv4(), message, onUndo }]);
+  const pushToast = (message, onUndo, opts = {}) => {
+    setToasts((prev) => [...prev, { id: uuidv4(), message, onUndo, ...opts }]);
   };
 
   const removeToast = (id) => {
@@ -273,7 +279,37 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
       audioTranscript: null,
     };
 
-    savePassage(passage);
+    const saveResult = savePassage(passage);
+
+    if (!saveResult.ok) {
+      if (isQuotaExceededError(saveResult.error)) {
+        // Leave savedPromise unresolved for now — a successful retry below
+        // resolves it to the real id; only a definitive failure resolves null.
+        pushToast(
+          'Storage full — tap to free up space and retry',
+          () => {
+            deleteOldestPassages(QUOTA_FREE_COUNT);
+            const retry = savePassage(passage);
+            if (retry.ok) {
+              resolveSaved(passage.id);
+              setHasPassages(true);
+              window.dispatchEvent(new CustomEvent('passage-saved', { detail: { id: passage.id } }));
+              pushToast('Captured', () => deletePassage(passage.id));
+              maybeMergeWithPrevious(passage);
+            } else {
+              resolveSaved(null);
+              pushToast("Still not enough space — delete more from the Library");
+            }
+          },
+          { actionLabel: 'Free up space', sticky: true }
+        );
+      } else {
+        resolveSaved(null);
+        pushToast("Couldn't save that — try again");
+      }
+      return;
+    }
+
     resolveSaved(passage.id);
     setHasPassages(true);
     window.dispatchEvent(new CustomEvent('passage-saved', { detail: { id: passage.id } }));

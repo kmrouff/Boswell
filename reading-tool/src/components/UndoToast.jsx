@@ -7,10 +7,11 @@ function Toast({ toast, onDismiss }) {
   onDismissRef.current = onDismiss;
 
   useEffect(() => {
+    if (toast.sticky) return;
     const timer = setTimeout(() => onDismissRef.current(toast.id), AUTO_DISMISS_MS);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [toast.id]);
+  }, [toast.id, toast.sticky]);
 
   return (
     <div className="flex items-center justify-between gap-4 rounded-lg bg-ink border border-parchment/20 px-4 py-3 text-sm text-parchment shadow-lg">
@@ -24,7 +25,7 @@ function Toast({ toast, onDismiss }) {
             onDismiss(toast.id);
           }}
         >
-          Undo
+          {toast.actionLabel || 'Undo'}
         </button>
       )}
     </div>

@@ -49,6 +49,19 @@ export const replacePassages = (idsToRemove, newPassage) => {
 
 export const clearAllPassages = () => writePassages([]);
 
+// Cross-browser check for a localStorage quota error, so callers can offer a
+// "free up space" recovery instead of just failing silently.
+export const isQuotaExceededError = (err) =>
+  err instanceof DOMException &&
+  (err.name === 'QuotaExceededError' || err.name === 'NS_ERROR_DOM_QUOTA_REACHED' || err.code === 22 || err.code === 1014);
+
+// Drops the oldest N passages (the end of the array, since new ones are
+// unshifted to the front) to recover from a quota error.
+export const deleteOldestPassages = (count) => {
+  const passages = getPassages();
+  return writePassages(passages.slice(0, Math.max(0, passages.length - count)));
+};
+
 // Re-inserts a passage at a specific index — used to restore a deleted
 // passage to its original position for the Library undo snackbar, rather
 // than always landing back at the front like a fresh capture would.
