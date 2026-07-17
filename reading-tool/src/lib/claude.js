@@ -1,6 +1,8 @@
-const API_URL = 'https://api.anthropic.com/v1/messages';
+// Same-origin proxy (api/claude.js) — holds the real API key server-side,
+// both in the deployed Vercel function and in local dev via the Vite
+// middleware in vite.config.js. The client never sees the key.
+const API_URL = '/api/claude';
 const MODEL = 'claude-sonnet-4-6';
-const API_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY;
 
 const EXTRACT_SYSTEM_PROMPT = `You are a reading annotation assistant. The user has captured a cropped region of a page, indicating a passage of text they want to save by dragging their finger down the screen over that region on their phone (the phone's camera itself is held still; the drag was on the touchscreen, not physically over the page).
 
@@ -30,12 +32,7 @@ const parseJsonResponse = (text) => {
 const callClaude = async (body) => {
   const res = await fetch(API_URL, {
     method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': API_KEY,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-    },
+    headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
 
@@ -270,12 +267,7 @@ Only include this when a single passage is clearly the primary source; omit it e
 
   const res = await fetch(API_URL, {
     method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': API_KEY,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-    },
+    headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       model: MODEL,
       max_tokens: 2048,
