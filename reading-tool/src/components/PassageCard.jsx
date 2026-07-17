@@ -130,49 +130,42 @@ export default function PassageCard({ passage, grouped, isOpen, onSwipeChange, o
     onDelete(passage.id);
   };
 
-  // Pointer-based horizontal swipe: engage only once |dx|>|dy| past a 6px
-  // threshold (so vertical list scroll still works), lock to that axis for
-  // the gesture, and suppress the card's expand-tap if a drag occurred.
+  // Native touch events, matching the pattern CaptureView already uses
+  // successfully on real phones — switched over from Pointer Events, whose
+  // reliability on iOS Safari (especially combined with touch-action and
+  // setPointerCapture) turned out to be the real culprit behind the swipe
+  // still being unreliable after two rounds of tuning the pointer-based
+  // version. Touch events don't need any capture call at all: per spec,
+  // touchmove/touchend for a given touch are always delivered to whatever
+  // element touchstart fired on, regardless of where the finger travels —
+  // exactly the "lost event" problem setPointerCapture was trying to work
+  // around, solved at the platform level instead.
   //
-  // Pointer capture is grabbed immediately on pointerdown (not deferred to
-  // axis-lock time) — a fast real-finger swipe can otherwise carry the touch
-  // point outside the card's bounds before the 6px threshold is even
-  // crossed, and without capture already in place the browser can fail to
-  // deliver the follow-up move/up events to this element at all, leaving
-  // the card stuck mid-drag. Capturing early doesn't block native vertical
-  // scroll — that's governed by touch-action, not pointer capture.
-  const handlePointerDown = (e) => {
-    dragStateRef.current = { x: e.clientX, y: e.clientY, axis: null };
-    try {
-      e.currentTarget.setPointerCapture?.(e.pointerId);
-    } catch {
-      // Throws on synthetic/edge pointer sequences — safe to ignore.
-    }
+  // Axis is decided once enough combined movement has happened (not off the
+  // first couple of noisy pixels — a real thumb's initial contact is rarely
+  // dead level, so deciding too early was misreading horizontal swipes as
+  // vertical and locking them out for the whole gesture), then locked for
+  // its duration so vertical list scroll and horizontal reveal don't fight.
+  const handleTouchStart = (e) => {
+    const t = e.touches[0];
+    dragStateRef.current = { x: t.clientX, y: t.clientY, axis: null };
   };
-  const handlePointerMove = (e) => {
+  const handleTouchMove = (e) => {
     const st = dragStateRef.current;
     if (!st) return;
-    const dx = e.clientX - st.x;
-    const dy = e.clientY - st.y;
+    const t = e.touches[0];
+    const dx = t.clientX - st.x;
+    const dy = t.clientY - st.y;
     if (!st.axis) {
-      // Wait for enough combined movement before reading a direction out of
-      // it — deciding off the first couple of noisy pixels (the old 6px
-      // either-axis check) was locking genuine horizontal swipes to 'y' by
-      // mistake whenever a real thumb's initial touch wasn't dead level,
-      // which is most of the time. More samples first, then decide.
       if (Math.hypot(dx, dy) < 10) return;
       st.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
     }
     if (st.axis !== 'x') return;
-    // Extra defense alongside touch-action: pan-y — once we know this is a
-    // horizontal gesture, explicitly stop the browser from also trying to
-    // interpret it as a scroll attempt.
-    e.preventDefault();
     dragMovedRef.current = true;
     const base = isOpen ? -OPEN_W : 0;
     setDragX(Math.min(0, Math.max(-OPEN_W - 24, base + dx)));
   };
-  const handlePointerUp = () => {
+  const handleTouchEnd = () => {
     const st = dragStateRef.current;
     dragStateRef.current = null;
     if (!st) return;
@@ -223,11 +216,10 @@ export default function PassageCard({ passage, grouped, isOpen, onSwipeChange, o
 
       {/* sliding card */}
       <div
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={handlePointerUp}
-        onLostPointerCapture={handlePointerUp}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchEnd}
         className="relative border p-[18px]"
         style={{
           borderColor: 'rgb(var(--fg) / .1)',
