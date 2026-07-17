@@ -8,7 +8,7 @@
 - [x] Phase 5 — Voice notes — needs real-mic verification, see note
 - [x] Phase 6 — Library view
 - [x] Phase 7 — Chat view
-- [ ] Phase 8 — Polish pass (Claude Design handoff + quota handling done — see notes; needs your on-device confirmation)
+- [x] Phase 8 — Polish pass — real-phone confirmed 2026-07-17 (design handoff, quota handling, 3 rounds of gesture/UX fixes)
 - [ ] Phase 9 — Backend proxy + feedback/messenger system (deferred until Phase 8 design work lands)
 - [ ] Phase 10 — Deploy (Vercel, PWA manifest, IndexedDB migration if needed) (deferred, low priority until sharing is imminent)
 
