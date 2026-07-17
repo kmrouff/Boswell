@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 
-// Longer + slower than the passage-capture flash — this is a rarer,
-// more deliberate action and should read as a clear confirmation, not a blip.
-const LOGGED_FADE_MS = 2200;
+// A bit longer than the passage-capture flash since this is a rarer,
+// more deliberate action — but should still read as a quick confirmation,
+// not linger. (Was 2200ms — cut down per real-device feedback that it hung
+// around too long.)
+const LOGGED_FADE_MS = 1000;
 
 // Two-phase feedback for the triple-tap "log title" gesture:
 // - 'capturing': shown the instant the triple-tap fires, before extraction

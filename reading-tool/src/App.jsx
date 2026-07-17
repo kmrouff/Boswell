@@ -55,6 +55,11 @@ function App() {
   // A small persistent badge on the Library tab, on for as long as Capture's
   // record button is in its post-capture "add a voice note?" window.
   const [libraryDot, setLibraryDot] = useState(false);
+  // Bumped on every passage-saved (a capture, or a voice note landing on
+  // one) — used as the dot's React key so it remounts and its pop animation
+  // replays each time, instead of only playing once when the dot first
+  // appears.
+  const [pulseKey, setPulseKey] = useState(0);
   // A request from the Library to (re)set a passage's title, routed to the
   // Capture view's title mode: { passageId } or null.
   const [titleRequest, setTitleRequest] = useState(null);
@@ -67,6 +72,7 @@ function App() {
     const onPassageSaved = () => {
       setLibraryPulsing(true);
       setTimeout(() => setLibraryPulsing(false), LIBRARY_PULSE_MS);
+      setPulseKey((k) => k + 1);
     };
     const onAudioWindowOpen = () => setLibraryDot(true);
     const onAudioWindowClose = () => setLibraryDot(false);
@@ -127,7 +133,8 @@ function App() {
               <span className="text-[11px] font-semibold">{label}</span>
               {id === 'library' && libraryDot && (
                 <span
-                  className="absolute h-2.5 w-2.5 rounded-full bg-amber-400"
+                  key={pulseKey}
+                  className="animate-badge-pop absolute h-2.5 w-2.5 rounded-full bg-amber-400"
                   style={{ top: 2, left: 'calc(50% + 7px)', boxShadow: '0 0 0 2px var(--bg)' }}
                 />
               )}

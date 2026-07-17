@@ -155,13 +155,19 @@ export default function PassageCard({ passage, grouped, isOpen, onSwipeChange, o
     const dx = e.clientX - st.x;
     const dy = e.clientY - st.y;
     if (!st.axis) {
-      if (Math.abs(dx) > 6 || Math.abs(dy) > 6) {
-        st.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
-      } else {
-        return;
-      }
+      // Wait for enough combined movement before reading a direction out of
+      // it — deciding off the first couple of noisy pixels (the old 6px
+      // either-axis check) was locking genuine horizontal swipes to 'y' by
+      // mistake whenever a real thumb's initial touch wasn't dead level,
+      // which is most of the time. More samples first, then decide.
+      if (Math.hypot(dx, dy) < 10) return;
+      st.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
     }
     if (st.axis !== 'x') return;
+    // Extra defense alongside touch-action: pan-y — once we know this is a
+    // horizontal gesture, explicitly stop the browser from also trying to
+    // interpret it as a scroll attempt.
+    e.preventDefault();
     dragMovedRef.current = true;
     const base = isOpen ? -OPEN_W : 0;
     setDragX(Math.min(0, Math.max(-OPEN_W - 24, base + dx)));

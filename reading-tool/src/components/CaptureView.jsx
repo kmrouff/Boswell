@@ -151,6 +151,13 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
     onTitleRequestHandled?.();
   }, [titleRequest, onTitleRequestHandled]);
 
+  // Without this, switching away from Capture mid-window leaves the pending
+  // auto-close setTimeout running — it isn't tied to this component's
+  // lifetime otherwise, so it can later fire and dispatch audio-window-close
+  // (a global event) at the wrong time, incorrectly closing a completely
+  // different, later capture's window after remounting.
+  useEffect(() => () => clearTimeout(audioWindowTimerRef.current), []);
+
   const dismissHint = () => {
     localStorage.setItem(HINT_DISMISSED_KEY, 'true');
     setHintDismissed(true);
