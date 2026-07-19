@@ -6,7 +6,8 @@ export const markWelcomeSeen = () => localStorage.setItem(WELCOMED_KEY, 'true');
 const GESTURES = [
   'Drag your finger over text to capture it.',
   'Triple-tap the title area to log a title.',
-  'Two-finger hold, anywhere, to send feedback.',
+  "Add a quick voice note to anything you've captured.",
+  'Two-finger press and hold, anywhere, to send feedback — I read every one, and I appreciate it.',
 ];
 
 // Shown once, the first time a session lands on this device (see App.jsx —

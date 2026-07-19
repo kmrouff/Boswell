@@ -5,31 +5,23 @@ import { supabase } from '../lib/supabaseClient.js';
 const CONTACT_EMAIL = 'kevinrouff@gmail.com';
 
 const MISSION_PARAGRAPHS = [
-  'Boswell keeps the lines worth keeping.',
-  "Drag your finger over a passage while you're reading, and it's saved — the lines, ideas, and thoughts that catch you, kept without breaking your stride. That's really the whole idea.",
-  "It's yours. Nothing you capture here gets sold, shared, or used to train anything. No ads, no tracking, no catch. Just a place to stash the thoughts and finds along your reading, so they're still there when you go looking for them.",
+  "Boswell isn't trying to be clever, or to clutter up your reading with one more thing to manage. It's just a small, helpful scribe — quiet, out of the way, there when you need it.",
+  "It came from an old habit of mine: drawing lines in margins, starring passages, dog-earing pages I meant to come back to and almost never did. Boswell is that habit, finally kept properly.",
+  "We are what we read. A real book — the weight of it, the years already in the paper — holds something a screen doesn't. Books are wondrous things, and they shouldn't have to lose out to a Kindle just so the good lines don't get lost. Boswell is here so they don't have to.",
 ];
 
 const PRIVACY_SECTIONS = [
   {
     heading: "What's stored",
-    body: 'Your email (for signing in), and whatever you capture — passage text, page numbers, titles, and any voice notes you dictate, as text only.',
+    body: 'Your email, and whatever you capture — passage text, titles, page numbers, and any voice notes, kept as text.',
   },
   {
-    heading: 'How it gets there',
-    body: "When you drag over a passage, that crop of the page is sent to Anthropic's Claude API once, to read the text out of it — then it's gone. Boswell never stores the image itself. Voice notes are transcribed by your browser's own speech recognition, not by us; only the resulting text is saved.",
+    heading: 'The photos',
+    body: 'Each capture is read once for its text, then let go. The photo itself is never stored.',
   },
   {
-    heading: 'Who can see it',
-    body: "Your passages live in a database walled off per account — nobody else using Boswell can see your stuff through the app. As the person running this, I could technically go look at the raw database directly, but I don't, and there's no reason to.",
-  },
-  {
-    heading: "What we don't do",
-    body: 'No ads. No analytics tracking you around. No selling or sharing your data with anyone, for any reason. Feedback you send goes to a private channel only I read, used only to make the app better.',
-  },
-  {
-    heading: 'Questions',
-    body: 'Use Contact us in this menu.',
+    heading: 'Who sees it',
+    body: "Just you — your library is walled off from everyone else's. Nothing here is ever sold, shared, or used for anything but running the app.",
   },
 ];
 
