@@ -33,9 +33,12 @@ export default function LoginView() {
       style={{ background: 'var(--bg)', color: 'rgb(var(--fg))' }}
     >
       <div className="text-center">
-        <div className="font-display text-[40px] leading-none">Reading Tool</div>
+        <div className="font-display text-[40px] leading-none">Boswell</div>
         <p className="mt-2 font-serif text-base italic" style={{ color: 'rgb(var(--fg) / .6)' }}>
-          Capture passages as you read.
+          verba volant, scripta manent
+        </p>
+        <p className="mt-1 font-sans text-xs" style={{ color: 'rgb(var(--fg) / .35)' }}>
+          spoken words fly away, written words remain
         </p>
       </div>
 
