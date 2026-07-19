@@ -318,7 +318,8 @@ export default function LibraryView({ onRequestTitle, flashRequest }) {
 
       <div
         onScroll={() => swipedId && setSwipedId(null)}
-        className="min-h-0 flex-1 overflow-y-auto px-[18px] pb-6"
+        className="min-h-0 flex-1 overflow-y-auto px-[18px] pb-6 select-none [-webkit-touch-callout:none]"
+        style={{ touchAction: 'pan-y' }}
       >
         {!grouped && buildRenderItems(filtered).map(renderPassageOrStack)}
 

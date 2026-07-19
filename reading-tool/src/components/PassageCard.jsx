@@ -5,6 +5,22 @@ import { isDictationSupported, startDictation } from '../lib/dictation.js';
 const OPEN_W = 148; // swipe-tray width in px — two actions
 const OPEN_W_UNSTACK = 222; // three actions, when unstacking is offered
 
+// Roughly 2 lines / 1 line at this card's font sizes and width. CSS
+// line-clamp + max-height turned out not to reliably cap the collapsed
+// box's height on real devices (kept showing full-height blank space until
+// expanded) — truncating the actual string is what guarantees the box is
+// only ever as tall as the text it's actually showing, regardless of any
+// browser's line-clamp support.
+const COLLAPSED_TEXT_CHARS = 110;
+const COLLAPSED_TRANSCRIPT_CHARS = 55;
+
+const truncateAtWord = (text, maxChars) => {
+  if (!text || text.length <= maxChars) return text;
+  const cut = text.slice(0, maxChars);
+  const lastSpace = cut.lastIndexOf(' ');
+  return (lastSpace > maxChars * 0.6 ? cut.slice(0, lastSpace) : cut).trim() + '…';
+};
+
 const HEART_PATH =
   'M12 20 C12 20 3.5 14.5 3.5 8.8 A4.3 4.3 0 0 1 12 6.2 A4.3 4.3 0 0 1 20.5 8.8 C20.5 14.5 12 20 12 20 Z';
 
@@ -291,10 +307,10 @@ export default function PassageCard({
           className="w-full cursor-pointer border-none bg-transparent p-0 text-left"
         >
           <p
-            className={`m-0 font-serif text-[19px] leading-[1.45] ${expanded ? '' : 'line-clamp-2'}`}
-            style={{ color: 'rgb(var(--fg))', maxHeight: expanded ? 'none' : '55px' }}
+            className="m-0 font-serif text-[19px] leading-[1.45]"
+            style={{ color: 'rgb(var(--fg))' }}
           >
-            {passage.refinedText}
+            {expanded ? passage.refinedText : truncateAtWord(passage.refinedText, COLLAPSED_TEXT_CHARS)}
           </p>
         </button>
 
@@ -318,10 +334,12 @@ export default function PassageCard({
               Voice note
             </span>
             <p
-              className={`mt-1 font-serif text-[14px] italic ${transcriptOpen ? '' : 'line-clamp-1'}`}
-              style={{ color: 'rgb(var(--fg) / .7)', maxHeight: transcriptOpen ? 'none' : '21px' }}
+              className="mt-1 font-serif text-[14px] italic"
+              style={{ color: 'rgb(var(--fg) / .7)' }}
             >
-              {passage.audioTranscript}
+              {transcriptOpen
+                ? passage.audioTranscript
+                : truncateAtWord(passage.audioTranscript, COLLAPSED_TRANSCRIPT_CHARS)}
             </p>
           </button>
         )}
