@@ -4,6 +4,7 @@ import LibraryView from './components/LibraryView.jsx';
 import ChatView from './components/ChatView.jsx';
 import FeedbackOverlay from './components/FeedbackOverlay.jsx';
 import LoginView from './components/LoginView.jsx';
+import WelcomeScreen, { hasSeenWelcome } from './components/WelcomeScreen.jsx';
 import { supabase, isSupabaseConfigured } from './lib/supabaseClient.js';
 import { applyThemeVars, resolveTheme, getStoredTheme, getStoredAccent, getStoredRadius } from './lib/theme.js';
 
@@ -78,6 +79,7 @@ function App() {
   // passage re-trigger the flash even though `id` didn't change.
   const [citeRequest, setCiteRequest] = useState(null);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [welcomed, setWelcomed] = useState(() => hasSeenWelcome());
   const feedbackGestureRef = useRef({ timer: null, points: new Map() });
   // undefined = session not checked yet, null = checked and signed out,
   // object = signed in.
@@ -117,6 +119,14 @@ function App() {
       window.removeEventListener('audio-window-open', onAudioWindowOpen);
       window.removeEventListener('audio-window-close', onAudioWindowClose);
     };
+  }, []);
+
+  // Settings' "Send feedback" row triggers the same overlay as the two-finger
+  // hold gesture, just via a window event instead of touch tracking.
+  useEffect(() => {
+    const onOpenFeedback = () => setFeedbackOpen(true);
+    window.addEventListener('open-feedback', onOpenFeedback);
+    return () => window.removeEventListener('open-feedback', onOpenFeedback);
   }, []);
 
   const requestTitleForPassage = (passageId) => {
@@ -196,6 +206,9 @@ function App() {
   }
   if (session === null) {
     return <LoginView />;
+  }
+  if (!welcomed) {
+    return <WelcomeScreen onDone={() => setWelcomed(true)} />;
   }
 
   return (
