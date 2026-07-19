@@ -331,27 +331,26 @@ export default function LibraryView({ onRequestTitle, flashRequest }) {
                 <button
                   type="button"
                   onClick={() => toggleGroup(title)}
-                  className="mt-2.5 flex w-full items-center gap-2.5 border px-[15px] py-3.5 text-left"
+                  className="mt-2.5 flex w-full items-center gap-2.5 border-none px-[15px] py-3.5 text-left shadow-sm"
                   style={{
-                    background: 'rgb(var(--fg) / .04)',
-                    borderColor: 'rgb(var(--fg) / .1)',
+                    background: 'rgb(var(--acc))',
                     borderRadius: 'var(--radius)',
                   }}
                 >
-                  <span className="w-3 shrink-0 text-[11px]" style={{ color: 'rgb(var(--fg) / .5)' }}>
+                  <span className="w-3 shrink-0 text-[11px]" style={{ color: 'rgb(var(--on-acc) / .7)' }}>
                     {open ? '▾' : '▸'}
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block font-serif text-[17px] leading-[1.2]" style={{ color: 'rgb(var(--fg))' }}>
+                    <span className="block font-serif text-[17px] leading-[1.2]" style={{ color: 'rgb(var(--on-acc))' }}>
                       {title}
                     </span>
                     {author && (
-                      <span className="mt-0.5 block font-sans text-[11.5px] tracking-wide" style={{ color: 'rgb(var(--fg) / .45)' }}>
+                      <span className="mt-0.5 block font-sans text-[11.5px] tracking-wide" style={{ color: 'rgb(var(--on-acc) / .7)' }}>
                         {author}
                       </span>
                     )}
                   </span>
-                  <span className="shrink-0 font-sans text-xs" style={{ color: 'rgb(var(--fg) / .4)' }}>
+                  <span className="shrink-0 font-sans text-xs" style={{ color: 'rgb(var(--on-acc) / .7)' }}>
                     {items.length}
                   </span>
                 </button>

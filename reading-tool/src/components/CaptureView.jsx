@@ -185,12 +185,14 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
   };
 
   // Opens (or extends) the record button's active window and the "Captured
-  // N" bubble — the same window drives both. Called on every successful
-  // capture with the stackId that capture was assigned (see performCapture):
-  // a fresh one if this starts a new spree, or the spree's existing one if
-  // it's continuing. If one arrives while a recording is already under way,
-  // it just re-affirms the window is open without starting a new auto-close
-  // countdown (that would risk cutting off an active recording).
+  // N" bubble — the same window drives both. Called optimistically the
+  // instant a drag is recognized as a capture (handleTouchEnd), before
+  // extraction even starts, so the confirmation reads as instant rather than
+  // waiting out the few-second API round trip — performCapture rolls this
+  // back via rollbackOptimisticCapture if the capture ultimately fails. If
+  // one arrives while a recording is already under way, it just re-affirms
+  // the window is open without starting a new auto-close countdown (that
+  // would risk cutting off an active recording).
   const openAudioWindow = (stackId, isNewSpree) => {
     clearTimeout(audioWindowTimerRef.current);
     setAudioWindowOpen(true);
@@ -214,6 +216,18 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
     setAudioWindowOpen(false);
     window.dispatchEvent(new CustomEvent('audio-window-close'));
     if (committed) window.dispatchEvent(new CustomEvent('capture-spree-saved'));
+  };
+
+  // Undoes an optimistic openAudioWindow call for a capture that turned out
+  // not to actually save — same shape as undoLastCapture's close-vs-decrement
+  // decision, just driven by isNewSpree (known at optimistic-open time)
+  // instead of a live captureCount read.
+  const rollbackOptimisticCapture = (isNewSpree) => {
+    if (isNewSpree) {
+      closeAudioWindow(false);
+    } else {
+      setCaptureCount((c) => Math.max(0, c - 1));
+    }
   };
 
   const removeToast = (id) => {
@@ -287,7 +301,10 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
 
   // Async and non-blocking: the UI is already back to ready by the time this
   // runs, and several can be in flight at once if the user gestures again.
-  const performCapture = async (path) => {
+  // stackId/isNewSpree are decided by the caller (handleTouchEnd) at drag
+  // time, not here at resolution time — see the "Captured N" bubble's
+  // optimistic-open comment below for why.
+  const performCapture = async (path, stackId, isNewSpree) => {
     const rawBounds = rawBoundsOf(path);
     let cropBounds = computeSelectionBounds(path);
 
@@ -323,6 +340,7 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
 
     if (result.error) {
       resolveSaved(null);
+      rollbackOptimisticCapture(isNewSpree);
       pushToast("Couldn't read that — try again");
       return;
     }
@@ -330,14 +348,6 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
     // A page number the capture actually saw wins and updates the indicator;
     // otherwise fall back to whatever page we currently think we're on.
     if (result.pageNumber) updatePageState(result.pageNumber);
-
-    // Decided at resolution time, not when the drag happened — if two drags
-    // are in flight at once, whichever capture's extraction finishes first
-    // claims/starts the spree, and the other joins it. Matches the existing
-    // rule that a voice note attaches to whatever's newest when it resolves,
-    // not whatever was newest when it started.
-    const isNewSpree = !spreeActiveRef.current;
-    const stackId = isNewSpree ? uuidv4() : spreeStackIdRef.current;
 
     const passage = {
       id: uuidv4(),
@@ -362,8 +372,11 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
 
     if (!saveResult.ok) {
       if (isQuotaExceededError(saveResult.error)) {
-        // Leave savedPromise unresolved for now — a successful retry below
-        // resolves it to the real id; only a definitive failure resolves null.
+        // Not saved (yet) — roll back the optimistic bubble now rather than
+        // let it sit there implying success while storage is actually full.
+        // A successful retry re-opens it fresh below; savedPromise is left
+        // unresolved until then, since only a definitive failure resolves null.
+        rollbackOptimisticCapture(isNewSpree);
         pushToast(
           'Storage full — tap to free up space and retry',
           () => {
@@ -383,6 +396,7 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
         );
       } else {
         resolveSaved(null);
+        rollbackOptimisticCapture(isNewSpree);
         pushToast("Couldn't save that — try again");
       }
       return;
@@ -390,7 +404,6 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
 
     resolveSaved(passage.id);
     window.dispatchEvent(new CustomEvent('passage-saved', { detail: { id: passage.id } }));
-    openAudioWindow(stackId, isNewSpree);
 
     maybeMergeWithPrevious(passage);
   };
@@ -570,7 +583,18 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
     // Normal mode: only a real drag captures a passage; stray taps do nothing.
     if (!isMeaningfulDrag(path)) return;
     if (!videoRef.current || videoRef.current.readyState < 2) return;
-    performCapture(path);
+
+    // Optimistic: open the "Captured N" bubble / record-button window right
+    // now, the instant the drag is recognized — not after the few-second
+    // extraction round trip performCapture is about to run. Decided here
+    // (real temporal drag order) rather than at extraction-resolution time,
+    // which also sidesteps the old race where two overlapping captures could
+    // resolve out of order and fight over which one "started" the spree.
+    const isNewSpree = !spreeActiveRef.current;
+    const stackId = isNewSpree ? uuidv4() : spreeStackIdRef.current;
+    openAudioWindow(stackId, isNewSpree);
+
+    performCapture(path, stackId, isNewSpree);
   };
 
   const cw = containerRef.current?.clientWidth ?? 0;
@@ -680,13 +704,16 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
       )}
 
       {/* "Captured N" + Undo — the primary immediate confirmation that a
-          drag actually landed, replacing a delayed toast. Visible for
-          exactly as long as the record button is active (same window —
-          see openAudioWindow/closeAudioWindow); fades away once the spree
-          goes idle, at which point the Library icon pulses instead to say
-          it's now fully saved. */}
+          drag actually landed, replacing a delayed toast. Sits on the same
+          row as the Page indicator and record button (bottom-[38px], h-9 —
+          matches PageIndicator's own centering against the record button's
+          center), just above the tab bar. Visible for exactly as long as
+          the record button is active (same window — see
+          openAudioWindow/closeAudioWindow); fades away once the spree goes
+          idle, at which point the Library icon pulses instead to say it's
+          now fully saved. */}
       {!cameraError && !titleMode && audioWindowOpen && captureCount > 0 && (
-        <div className="absolute bottom-28 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2">
+        <div className="absolute bottom-[38px] left-1/2 z-20 flex -translate-x-1/2 items-center gap-2">
           <button
             type="button"
             onClick={undoLastCapture}
@@ -695,7 +722,7 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
           >
             <span className="text-lg leading-none">↺</span>
           </button>
-          <div className="rounded-full bg-black/60 px-4 py-2 text-sm text-parchment">
+          <div className="flex h-9 items-center rounded-full bg-black/60 px-4 text-sm text-parchment">
             Captured {captureCount}
           </div>
         </div>
