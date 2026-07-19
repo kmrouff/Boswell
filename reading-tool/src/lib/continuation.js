@@ -51,6 +51,7 @@ export const maybeMergeWithPrevious = async (newPassage) => {
       pageNumber: prevPassage.pageNumber,
       sourceTitle: prevPassage.sourceTitle,
       sourceAuthor: prevPassage.sourceAuthor ?? newPassage.sourceAuthor ?? null,
+      stackId: prevPassage.stackId ?? newPassage.stackId ?? null,
       touchPath: [...(prevPassage.touchPath ?? []), ...(newPassage.touchPath ?? [])],
       selectionBounds: prevPassage.selectionBounds,
       isMerged: true,

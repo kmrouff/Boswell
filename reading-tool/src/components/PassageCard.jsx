@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { updatePassage } from '../lib/storage.js';
 import { isDictationSupported, startDictation } from '../lib/dictation.js';
 
-const OPEN_W = 148; // swipe-tray width in px
+const OPEN_W = 148; // swipe-tray width in px — two actions
+const OPEN_W_UNSTACK = 222; // three actions, when unstacking is offered
 
 const HEART_PATH =
   'M12 20 C12 20 3.5 14.5 3.5 8.8 A4.3 4.3 0 0 1 12 6.2 A4.3 4.3 0 0 1 20.5 8.8 C20.5 14.5 12 20 12 20 Z';
@@ -35,6 +36,17 @@ function TrashIcon({ size = 20 }) {
   );
 }
 
+// Two squares pulling apart — reads as "separate this from the group",
+// distinct from the trash/heart icons already in the tray.
+function UnstackIcon({ size = 20 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <rect x="3" y="8" width="9" height="9" rx="1.7" stroke="currentColor" strokeWidth="1.7" />
+      <rect x="12" y="7" width="9" height="9" rx="1.7" stroke="currentColor" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
 // Merging is intentionally invisible here — a merged passage renders
 // identically to a normal one, no badge, per spec. The vague `context` guess
 // from extraction is deliberately never shown; only confidently-known title/
@@ -45,7 +57,19 @@ function TrashIcon({ size = 20 }) {
 // `isOpen`/`onSwipeChange` are lifted to the list so only one card's swipe
 // tray is ever open at a time, and the list can force-close it on scroll/
 // view/tab changes.
-export default function PassageCard({ passage, grouped, isOpen, onSwipeChange, onDelete, onRequestTitle, onChanged, flash }) {
+export default function PassageCard({
+  passage,
+  grouped,
+  isOpen,
+  onSwipeChange,
+  onDelete,
+  onRequestTitle,
+  onChanged,
+  flash,
+  onUnlinkFromStack,
+  onRequestStack,
+}) {
+  const openW = onUnlinkFromStack ? OPEN_W_UNSTACK : OPEN_W;
   const [expanded, setExpanded] = useState(false);
   const [ringOn, setRingOn] = useState(false);
   const [ringTransition, setRingTransition] = useState(false);
@@ -162,8 +186,8 @@ export default function PassageCard({ passage, grouped, isOpen, onSwipeChange, o
     }
     if (st.axis !== 'x') return;
     dragMovedRef.current = true;
-    const base = isOpen ? -OPEN_W : 0;
-    setDragX(Math.min(0, Math.max(-OPEN_W - 24, base + dx)));
+    const base = isOpen ? -openW : 0;
+    setDragX(Math.min(0, Math.max(-openW - 24, base + dx)));
   };
   const handleTouchEnd = () => {
     const st = dragStateRef.current;
@@ -173,8 +197,8 @@ export default function PassageCard({ passage, grouped, isOpen, onSwipeChange, o
       dragMovedRef.current = false;
       return;
     }
-    const finalDragX = dragX ?? (isOpen ? -OPEN_W : 0);
-    const open = finalDragX < -OPEN_W / 2;
+    const finalDragX = dragX ?? (isOpen ? -openW : 0);
+    const open = finalDragX < -openW / 2;
     setDragX(null);
     onSwipeChange?.(open ? passage.id : null);
     setTimeout(() => {
@@ -183,17 +207,36 @@ export default function PassageCard({ passage, grouped, isOpen, onSwipeChange, o
   };
 
   const dragging = dragX !== null;
-  const tx = dragging ? dragX : isOpen ? -OPEN_W : 0;
+  const tx = dragging ? dragX : isOpen ? -openW : 0;
   const heartTrayColor = passage.priority ? '#C98A2B' : '#E3B75E';
 
   return (
     <div className="relative overflow-hidden" style={{ borderRadius: 'var(--radius)' }}>
-      {/* action tray, revealed as the card slides left */}
+      {/* action tray, revealed as the card slides left. Unstack (when
+          offered) sits closest to the card — the least destructive of the
+          three, revealed first — with favorite/delete further out. */}
       <div className="absolute inset-y-0 right-0 flex items-stretch">
         {/* Flush against the tray's own left edge and extending well past the
-            max overdrag (OPEN_W + 24), so the heart color always fills the
-            frame with no seam, however far the card is dragged. */}
-        <div className="absolute inset-y-0" style={{ right: '100%', width: 400, background: heartTrayColor }} />
+            max overdrag (openW + 24), so the leftmost action's color always
+            fills the frame with no seam, however far the card is dragged. */}
+        <div
+          className="absolute inset-y-0"
+          style={{ right: '100%', width: 400, background: onUnlinkFromStack ? '#6b6458' : heartTrayColor }}
+        />
+        {onUnlinkFromStack && (
+          <button
+            type="button"
+            onClick={() => {
+              onSwipeChange?.(null);
+              onUnlinkFromStack(passage.id);
+            }}
+            aria-label="Remove from stack"
+            className="flex w-[74px] items-center justify-center border-none"
+            style={{ background: '#6b6458', color: '#f2ede2' }}
+          >
+            <UnstackIcon />
+          </button>
+        )}
         <button
           type="button"
           onClick={togglePriority}
@@ -249,7 +292,7 @@ export default function PassageCard({ passage, grouped, isOpen, onSwipeChange, o
         >
           <p
             className={`m-0 font-serif text-[19px] leading-[1.45] ${expanded ? '' : 'line-clamp-2'}`}
-            style={{ color: 'rgb(var(--fg))', textWrap: 'pretty' }}
+            style={{ color: 'rgb(var(--fg))', maxHeight: expanded ? 'none' : '55px' }}
           >
             {passage.refinedText}
           </p>
@@ -276,7 +319,7 @@ export default function PassageCard({ passage, grouped, isOpen, onSwipeChange, o
             </span>
             <p
               className={`mt-1 font-serif text-[14px] italic ${transcriptOpen ? '' : 'line-clamp-1'}`}
-              style={{ color: 'rgb(var(--fg) / .7)' }}
+              style={{ color: 'rgb(var(--fg) / .7)', maxHeight: transcriptOpen ? 'none' : '21px' }}
             >
               {passage.audioTranscript}
             </p>
@@ -348,6 +391,19 @@ export default function PassageCard({ passage, grouped, isOpen, onSwipeChange, o
             >
               {recording ? 'Stop' : 'Add voice note'}
             </button>
+            {onRequestStack && passage.sourceTitle && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onRequestStack(passage.id);
+                }}
+                className="rounded-full border px-3.5 py-2 font-sans text-[12.5px]"
+                style={{ borderColor: 'rgb(var(--fg) / .2)', color: 'rgb(var(--fg) / .8)' }}
+              >
+                Stack with…
+              </button>
+            )}
           </div>
         )}
 

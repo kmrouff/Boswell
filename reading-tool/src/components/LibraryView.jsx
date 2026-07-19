@@ -1,10 +1,37 @@
 import { useEffect, useRef, useState } from 'react';
-import { getPassages, deletePassage, insertPassageAt } from '../lib/storage.js';
+import { v4 as uuidv4 } from 'uuid';
+import { getPassages, deletePassage, insertPassageAt, updatePassage } from '../lib/storage.js';
 import PassageCard, { HeartIcon } from './PassageCard.jsx';
+import StackedCard from './StackedCard.jsx';
 import SettingsDrawer from './SettingsDrawer.jsx';
 
 const MISC = 'Miscellaneous';
 const UNDO_WINDOW_MS = 5000;
+
+// Groups a list (already filtered/ordered) into render units: passages that
+// share a stackId with 2+ others in this same list become one 'stack' unit
+// at the position of their first (newest) appearance; everything else stays
+// 'single'. Scoped to whatever list is passed in, so by-title mode naturally
+// only stacks within a title without any extra bookkeeping.
+const buildRenderItems = (list) => {
+  const counts = new Map();
+  for (const p of list) {
+    if (!p.stackId) continue;
+    counts.set(p.stackId, (counts.get(p.stackId) || 0) + 1);
+  }
+  const seenStacks = new Set();
+  const items = [];
+  for (const p of list) {
+    if (p.stackId && counts.get(p.stackId) >= 2) {
+      if (seenStacks.has(p.stackId)) continue;
+      seenStacks.add(p.stackId);
+      items.push({ type: 'stack', stackId: p.stackId, members: list.filter((x) => x.stackId === p.stackId) });
+    } else {
+      items.push({ type: 'single', passage: p });
+    }
+  }
+  return items;
+};
 
 function DotsIcon() {
   return (
@@ -22,10 +49,12 @@ export default function LibraryView({ onRequestTitle, flashRequest }) {
   const [favOnly, setFavOnly] = useState(false);
   const [grouped, setGrouped] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState({});
+  const [expandedStacks, setExpandedStacks] = useState({});
   const [swipedId, setSwipedId] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [deleted, setDeleted] = useState(null); // { passage, index }
   const [flashId, setFlashId] = useState(null);
+  const [stackPickerFor, setStackPickerFor] = useState(null); // passage id or null
   const deleteTimerRef = useRef(null);
   const flashTimerRef = useRef(null);
 
@@ -36,14 +65,19 @@ export default function LibraryView({ onRequestTitle, flashRequest }) {
   }, []);
 
   // Citation jump from Chat: highlight the passage, and if it's hidden
-  // inside a collapsed by-title group, expand that group so it's visible.
+  // inside a collapsed by-title group and/or a collapsed stack, expand
+  // whichever of those it's inside so it's actually visible.
   useEffect(() => {
     if (!flashRequest) return;
-    const target = getPassages().find((p) => p.id === flashRequest.id);
+    const all = getPassages();
+    const target = all.find((p) => p.id === flashRequest.id);
     if (!target) return;
     if (grouped) {
       const key = target.sourceTitle || MISC;
       setExpandedGroups((g) => (g[key] ? g : { ...g, [key]: true }));
+    }
+    if (target.stackId && all.filter((p) => p.stackId === target.stackId).length >= 2) {
+      setExpandedStacks((s) => (s[target.stackId] ? s : { ...s, [target.stackId]: true }));
     }
     setFlashId(flashRequest.id);
     clearTimeout(flashTimerRef.current);
@@ -75,6 +109,43 @@ export default function LibraryView({ onRequestTitle, flashRequest }) {
   };
 
   const toggleGroup = (title) => setExpandedGroups((g) => ({ ...g, [title]: !g[title] }));
+  const toggleStack = (stackId) => setExpandedStacks((s) => ({ ...s, [stackId]: !s[stackId] }));
+
+  const unlinkFromStack = (id) => {
+    updatePassage(id, { stackId: null });
+    refresh();
+  };
+
+  // Same-title passages this one could join into a stack — excludes itself
+  // and anything already sharing its stackId, since those are already
+  // stacked together.
+  const stackCandidates = (id) => {
+    const all = getPassages();
+    const source = all.find((p) => p.id === id);
+    if (!source?.sourceTitle) return [];
+    return all.filter(
+      (p) => p.id !== id && p.sourceTitle === source.sourceTitle && !(source.stackId && p.stackId === source.stackId)
+    );
+  };
+
+  // Joins source and target into one stack. If either already belongs to a
+  // stack, every member of that stack comes along too — so picking one card
+  // from an existing 3-stack merges the whole 3 in, not just that one card.
+  const stackWith = (sourceId, targetId) => {
+    const all = getPassages();
+    const source = all.find((p) => p.id === sourceId);
+    const target = all.find((p) => p.id === targetId);
+    if (!source || !target) return;
+    const finalStackId = source.stackId || target.stackId || uuidv4();
+    const sourceGroup = source.stackId ? all.filter((p) => p.stackId === source.stackId) : [source];
+    const targetGroup = target.stackId ? all.filter((p) => p.stackId === target.stackId) : [target];
+    const members = new Map([...sourceGroup, ...targetGroup].map((p) => [p.id, p]));
+    for (const p of members.values()) {
+      if (p.stackId !== finalStackId) updatePassage(p.id, { stackId: finalStackId });
+    }
+    setExpandedStacks((s) => ({ ...s, [finalStackId]: true }));
+    refresh();
+  };
 
   if (passages.length === 0) {
     return (
@@ -106,6 +177,7 @@ export default function LibraryView({ onRequestTitle, flashRequest }) {
     onDelete: handleDelete,
     onRequestTitle,
     onChanged: refresh,
+    onRequestStack: setStackPickerFor,
   };
 
   let groupedEntries = null;
@@ -122,6 +194,48 @@ export default function LibraryView({ onRequestTitle, flashRequest }) {
       return 0;
     });
   }
+
+  const renderPassageOrStack = (item) =>
+    item.type === 'stack' ? (
+      expandedStacks[item.stackId] ? (
+        <div key={item.stackId} className="mt-3 rounded-[calc(var(--radius)+6px)] border-l-2 pl-2" style={{ borderColor: 'rgb(var(--acc) / .4)' }}>
+          <button
+            type="button"
+            onClick={() => toggleStack(item.stackId)}
+            className="mb-2 flex items-center gap-1.5 border-none bg-transparent font-sans text-[11.5px] font-semibold"
+            style={{ color: 'rgb(var(--acc))' }}
+          >
+            ▾ {item.members.length} captured together — tap to collapse
+          </button>
+          {item.members.map((passage) => (
+            <div key={passage.id} className="mt-2">
+              <PassageCard
+                passage={passage}
+                grouped={grouped}
+                {...cardProps}
+                isOpen={swipedId === passage.id}
+                flash={flashId === passage.id}
+                onUnlinkFromStack={unlinkFromStack}
+              />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div key={item.stackId} className="mt-3">
+          <StackedCard members={item.members} onExpand={() => toggleStack(item.stackId)} />
+        </div>
+      )
+    ) : (
+      <div key={item.passage.id} className="mt-3">
+        <PassageCard
+          passage={item.passage}
+          grouped={grouped}
+          {...cardProps}
+          isOpen={swipedId === item.passage.id}
+          flash={flashId === item.passage.id}
+        />
+      </div>
+    );
 
   return (
     <div className="relative flex h-full flex-col">
@@ -206,18 +320,7 @@ export default function LibraryView({ onRequestTitle, flashRequest }) {
         onScroll={() => swipedId && setSwipedId(null)}
         className="min-h-0 flex-1 overflow-y-auto px-[18px] pb-6"
       >
-        {!grouped &&
-          filtered.map((passage) => (
-            <div key={passage.id} className="mt-3">
-              <PassageCard
-                passage={passage}
-                grouped={false}
-                {...cardProps}
-                isOpen={swipedId === passage.id}
-                flash={flashId === passage.id}
-              />
-            </div>
-          ))}
+        {!grouped && buildRenderItems(filtered).map(renderPassageOrStack)}
 
         {grouped &&
           groupedEntries.map(([title, items]) => {
@@ -252,18 +355,7 @@ export default function LibraryView({ onRequestTitle, flashRequest }) {
                     {items.length}
                   </span>
                 </button>
-                {open &&
-                  items.map((passage) => (
-                    <div key={passage.id} className="mt-3">
-                      <PassageCard
-                        passage={passage}
-                        grouped
-                        {...cardProps}
-                        isOpen={swipedId === passage.id}
-                        flash={flashId === passage.id}
-                      />
-                    </div>
-                  ))}
+                {open && buildRenderItems(items).map(renderPassageOrStack)}
               </div>
             );
           })}
@@ -293,6 +385,60 @@ export default function LibraryView({ onRequestTitle, flashRequest }) {
           >
             <span className="text-[17px] leading-none">↺</span> Undo
           </button>
+        </div>
+      )}
+
+      {stackPickerFor && (
+        <div
+          className="fixed inset-0 z-40 flex items-end"
+          style={{ background: 'rgb(0 0 0 / .4)' }}
+          onClick={() => setStackPickerFor(null)}
+        >
+          <div
+            className="w-full rounded-t-2xl p-5"
+            style={{ background: 'var(--raised)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-3 font-serif text-lg" style={{ color: 'rgb(var(--fg))' }}>
+              Stack with…
+            </div>
+            <div className="flex max-h-[50vh] flex-col gap-2 overflow-y-auto">
+              {stackCandidates(stackPickerFor).map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => {
+                    stackWith(stackPickerFor, c.id);
+                    setStackPickerFor(null);
+                  }}
+                  className="rounded-[14px] border p-3 text-left"
+                  style={{ borderColor: 'rgb(var(--fg) / .14)', background: 'rgb(var(--fg) / .04)' }}
+                >
+                  <p className="m-0 line-clamp-1 font-serif text-[15px]" style={{ color: 'rgb(var(--fg))' }}>
+                    {c.refinedText}
+                  </p>
+                  {c.pageNumber && (
+                    <p className="mt-1 font-sans text-[11.5px]" style={{ color: 'rgb(var(--fg) / .5)' }}>
+                      p. {c.pageNumber}
+                    </p>
+                  )}
+                </button>
+              ))}
+              {stackCandidates(stackPickerFor).length === 0 && (
+                <p className="py-2 font-sans text-sm" style={{ color: 'rgb(var(--fg) / .5)' }}>
+                  No other passages from this title yet.
+                </p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setStackPickerFor(null)}
+              className="mt-4 w-full rounded-full border py-2.5 font-sans text-sm font-semibold"
+              style={{ borderColor: 'rgb(var(--fg) / .2)', color: 'rgb(var(--fg) / .7)' }}
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       )}
 

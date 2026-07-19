@@ -79,7 +79,14 @@ function App() {
   const feedbackGestureRef = useRef({ timer: null, points: new Map() });
 
   useEffect(() => {
+    // The dot's own small pop replays on every passage-saved (subtle, fine
+    // to be chatty). The big nav-icon bounce is reserved for a capture
+    // spree actually finishing — see CaptureView's closeAudioWindow — so it
+    // reads as "this batch is now saved," not one bounce per capture.
     const onPassageSaved = () => {
+      setPulseKey((k) => k + 1);
+    };
+    const onCaptureSpreeSaved = () => {
       setLibraryPulsing(true);
       setTimeout(() => setLibraryPulsing(false), LIBRARY_PULSE_MS);
       setPulseKey((k) => k + 1);
@@ -87,10 +94,12 @@ function App() {
     const onAudioWindowOpen = () => setLibraryDot(true);
     const onAudioWindowClose = () => setLibraryDot(false);
     window.addEventListener('passage-saved', onPassageSaved);
+    window.addEventListener('capture-spree-saved', onCaptureSpreeSaved);
     window.addEventListener('audio-window-open', onAudioWindowOpen);
     window.addEventListener('audio-window-close', onAudioWindowClose);
     return () => {
       window.removeEventListener('passage-saved', onPassageSaved);
+      window.removeEventListener('capture-spree-saved', onCaptureSpreeSaved);
       window.removeEventListener('audio-window-open', onAudioWindowOpen);
       window.removeEventListener('audio-window-close', onAudioWindowClose);
     };

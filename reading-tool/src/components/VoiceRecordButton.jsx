@@ -3,7 +3,9 @@
 // speak a title rather than attach an audio note) it turns amber to signal the
 // different purpose.
 export default function VoiceRecordButton({ isRecording, disabled, dictation, onToggle }) {
-  const dotColor = dictation ? 'bg-amber-400' : 'bg-red-500';
+  // Grey when inactive, its real color once active — a clearer active/
+  // inactive signal than opacity alone.
+  const dotColor = disabled ? 'bg-gray-500' : dictation ? 'bg-amber-400' : 'bg-red-500';
   const activeBorder = dictation ? 'border-amber-300 bg-amber-400/20' : 'border-red-400 bg-red-500/20';
 
   return (

@@ -22,6 +22,7 @@ import {
 import { extractPassage, extractTitle, extractPageNumber } from '../lib/claude.js';
 import {
   savePassage,
+  deletePassage,
   getPassage,
   getPassages,
   updatePassage,
@@ -84,6 +85,10 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
   // can otherwise close over a stale value from before an await resolved.
   const isRecordingRef = useRef(false);
   const audioWindowTimerRef = useRef(null);
+  // Whether the current audio window represents an ongoing multi-capture
+  // spree, and which stackId ties its captures together in the Library.
+  const spreeActiveRef = useRef(false);
+  const spreeStackIdRef = useRef(null);
 
   const [cameraError, setCameraError] = useState(null);
   const [dragBounds, setDragBounds] = useState(null);
@@ -98,6 +103,10 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
   // recording) — gates whether the record button is active, and whether the
   // Library nav badge is showing. See openAudioWindow below.
   const [audioWindowOpen, setAudioWindowOpen] = useState(false);
+  // How many captures have landed in the current spree — shown in the
+  // "Captured N" bubble, which is visible for exactly as long as
+  // audioWindowOpen is (they're the same window, just two facets of it).
+  const [captureCount, setCaptureCount] = useState(0);
   const [currentTitle, setCurrentTitle] = useState(() => getCurrentSourceTitle());
   const [currentAuthor, setCurrentAuthor] = useState(() => getCurrentSourceAuthor());
   const [currentPage, setCurrentPageState] = useState(() => getCurrentPage());
@@ -175,25 +184,36 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
     setToasts((prev) => [...prev, { id: uuidv4(), message, onUndo, ...opts }]);
   };
 
-  // Opens (or extends) the record button's active window. Called on every
-  // successful capture — if one arrives while a recording is already under
-  // way, it just re-affirms the window is open without starting a new
-  // auto-close countdown (that would risk cutting off an active recording).
-  const openAudioWindow = () => {
+  // Opens (or extends) the record button's active window and the "Captured
+  // N" bubble — the same window drives both. Called on every successful
+  // capture with the stackId that capture was assigned (see performCapture):
+  // a fresh one if this starts a new spree, or the spree's existing one if
+  // it's continuing. If one arrives while a recording is already under way,
+  // it just re-affirms the window is open without starting a new auto-close
+  // countdown (that would risk cutting off an active recording).
+  const openAudioWindow = (stackId, isNewSpree) => {
     clearTimeout(audioWindowTimerRef.current);
     setAudioWindowOpen(true);
+    spreeActiveRef.current = true;
+    spreeStackIdRef.current = stackId;
+    setCaptureCount((c) => (isNewSpree ? 1 : c + 1));
     window.dispatchEvent(new CustomEvent('audio-window-open'));
     if (isRecordingRef.current) return;
     audioWindowTimerRef.current = setTimeout(() => {
-      setAudioWindowOpen(false);
-      window.dispatchEvent(new CustomEvent('audio-window-close'));
+      audioWindowTimerRef.current = null;
+      closeAudioWindow(true);
     }, AUDIO_WINDOW_MS);
   };
 
-  const closeAudioWindow = () => {
+  // `committed` distinguishes "the spree finished naturally (timeout or a
+  // recording wrapped up) — pulse the Library icon to say it's saved" from
+  // "the user undid their way back to zero captures — nothing to celebrate."
+  const closeAudioWindow = (committed) => {
     clearTimeout(audioWindowTimerRef.current);
+    spreeActiveRef.current = false;
     setAudioWindowOpen(false);
     window.dispatchEvent(new CustomEvent('audio-window-close'));
+    if (committed) window.dispatchEvent(new CustomEvent('capture-spree-saved'));
   };
 
   const removeToast = (id) => {
@@ -311,6 +331,14 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
     // otherwise fall back to whatever page we currently think we're on.
     if (result.pageNumber) updatePageState(result.pageNumber);
 
+    // Decided at resolution time, not when the drag happened — if two drags
+    // are in flight at once, whichever capture's extraction finishes first
+    // claims/starts the spree, and the other joins it. Matches the existing
+    // rule that a voice note attaches to whatever's newest when it resolves,
+    // not whatever was newest when it started.
+    const isNewSpree = !spreeActiveRef.current;
+    const stackId = isNewSpree ? uuidv4() : spreeStackIdRef.current;
+
     const passage = {
       id: uuidv4(),
       capturedAt: new Date().toISOString(),
@@ -327,6 +355,7 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
       priority: false,
       audioNote: null,
       audioTranscript: null,
+      stackId,
     };
 
     const saveResult = savePassage(passage);
@@ -343,7 +372,7 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
             if (retry.ok) {
               resolveSaved(passage.id);
               window.dispatchEvent(new CustomEvent('passage-saved', { detail: { id: passage.id } }));
-              openAudioWindow();
+              openAudioWindow(stackId, isNewSpree);
               maybeMergeWithPrevious(passage);
             } else {
               resolveSaved(null);
@@ -361,9 +390,34 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
 
     resolveSaved(passage.id);
     window.dispatchEvent(new CustomEvent('passage-saved', { detail: { id: passage.id } }));
-    openAudioWindow();
+    openAudioWindow(stackId, isNewSpree);
 
     maybeMergeWithPrevious(passage);
+  };
+
+  // Removes the most-recently-captured passage and decrements the "Captured
+  // N" count. Dropping to zero ends the spree outright — nothing left to
+  // attach a voice note to, so there's no reason to keep the window open.
+  // The close-vs-decrement decision reads captureCount directly rather than
+  // inside the setCaptureCount updater — updater functions must stay pure,
+  // and closeAudioWindow has side effects (another setState, dispatching
+  // window events).
+  const undoLastCapture = () => {
+    const latest = getPassages()[0];
+    if (!latest) return;
+    deletePassage(latest.id);
+    window.dispatchEvent(new CustomEvent('passage-saved', { detail: { id: latest.id } }));
+    navigator.vibrate?.(10);
+    if (captureCount <= 1) {
+      // Deferred a tick: calling this synchronously right after the
+      // passage-saved dispatch above — both of which trigger setState in
+      // App, a different component than the one this click handler
+      // belongs to — was tripping React's cross-component
+      // update-during-render warning.
+      setTimeout(() => closeAudioWindow(false), 0);
+    } else {
+      setCaptureCount((c) => Math.max(0, c - 1));
+    }
   };
 
   // Record button: dictates a title while in title mode (amber), otherwise
@@ -399,7 +453,7 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
       // Whatever passage is newest right now "wins" the note — if another
       // drag happened while this recording was running, it's that one, not
       // whatever was newest when recording started.
-      closeAudioWindow();
+      closeAudioWindow(true);
       if (!transcript) return;
       const latest = getPassages()[0];
       if (!latest) return; // nothing to attach to anymore
@@ -622,6 +676,28 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
       {isRecording && (
         <div className="absolute bottom-28 left-1/2 z-20 max-w-[80%] -translate-x-1/2 rounded-lg bg-black/70 px-4 py-2 text-center text-sm text-parchment">
           {dictationText || (titleMode ? 'Speak the title…' : 'Listening…')}
+        </div>
+      )}
+
+      {/* "Captured N" + Undo — the primary immediate confirmation that a
+          drag actually landed, replacing a delayed toast. Visible for
+          exactly as long as the record button is active (same window —
+          see openAudioWindow/closeAudioWindow); fades away once the spree
+          goes idle, at which point the Library icon pulses instead to say
+          it's now fully saved. */}
+      {!cameraError && !titleMode && audioWindowOpen && captureCount > 0 && (
+        <div className="absolute bottom-28 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2">
+          <button
+            type="button"
+            onClick={undoLastCapture}
+            aria-label="Undo last capture"
+            className="flex h-9 w-9 items-center justify-center rounded-full border-none bg-black/60 text-parchment"
+          >
+            <span className="text-lg leading-none">↺</span>
+          </button>
+          <div className="rounded-full bg-black/60 px-4 py-2 text-sm text-parchment">
+            Captured {captureCount}
+          </div>
         </div>
       )}
 
