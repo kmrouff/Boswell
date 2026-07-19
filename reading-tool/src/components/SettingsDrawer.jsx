@@ -6,7 +6,7 @@ const CONTACT_EMAIL = 'kevinrouff@gmail.com';
 
 const MISSION_PARAGRAPHS = [
   'Boswell keeps the lines worth keeping.',
-  "Drag your finger over a passage while you're reading, and it's saved — no typing it out, no dog-earing the page, no losing your spot. That's really the whole idea.",
+  "Drag your finger over a passage while you're reading, and it's saved — the lines, ideas, and thoughts that catch you, kept without breaking your stride. That's really the whole idea.",
   "It's yours. Nothing you capture here gets sold, shared, or used to train anything. No ads, no tracking, no catch. Just a place to stash the thoughts and finds along your reading, so they're still there when you go looking for them.",
 ];
 

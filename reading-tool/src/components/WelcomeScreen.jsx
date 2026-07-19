@@ -28,20 +28,17 @@ export default function WelcomeScreen({ onDone }) {
       <div className="max-w-xs text-center">
         <div className="font-display text-[34px] leading-none">Boswell</div>
         <p className="mt-3 font-serif text-base leading-relaxed" style={{ color: 'rgb(var(--fg) / .75)' }}>
-          Drag your finger over a passage while you're reading, and it's saved. No typing it out, no losing your
-          spot.
+          Drag your finger over a passage while you're reading, and it's saved — the lines, ideas, and thoughts that
+          catch you, kept without breaking your stride.
         </p>
       </div>
 
-      <div className="flex w-full max-w-xs flex-col gap-3">
+      <div className="flex w-full max-w-xs flex-col gap-2.5 text-left">
         {GESTURES.map((g) => (
-          <div
-            key={g}
-            className="rounded-xl px-4 py-3 font-sans text-sm"
-            style={{ background: 'rgb(var(--fg) / .05)', color: 'rgb(var(--fg) / .8)' }}
-          >
+          <p key={g} className="font-sans text-sm leading-snug" style={{ color: 'rgb(var(--fg) / .65)' }}>
+            <span style={{ color: 'rgb(var(--fg) / .3)' }}>— </span>
             {g}
-          </div>
+          </p>
         ))}
       </div>
 
