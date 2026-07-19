@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 
 const MARGIN_INSET_PCT = 8;
-const TICK_LENGTH_PCT = 5;
 export const FADE_DURATION_MS = 550;
 
-// Bracket-style tick marks confined to the left/right margins, marking the
-// vertical extent of a drag without covering the text in the middle.
+// Vertical lines confined to the left/right margins, marking the vertical
+// extent of a drag without covering the text in the middle. Amber, matching
+// the rest of the capture-mode camera chrome (TitleModeOverlay's corner
+// brackets) — chosen over the earlier dark slate for real-world contrast
+// against a live camera feed, per real-device feedback that the ticks were
+// hard to see.
 // While `fading` is true, it fades itself out and calls onFadeComplete once done.
 export default function MarginTicks({ yMin, yMax, containerHeight, fading = false, onFadeComplete }) {
   const [opacity, setOpacity] = useState(1);
@@ -34,27 +37,17 @@ export default function MarginTicks({ yMin, yMax, containerHeight, fading = fals
     ? { transition: `opacity ${FADE_DURATION_MS}ms ease-out`, opacity }
     : { opacity: 1 };
 
-  const Bracket = ({ side }) => (
-    <>
-      <div
-        className="pointer-events-none absolute w-0.5 bg-slate-700/90"
-        style={{ ...fadeStyle, [side]: `${MARGIN_INSET_PCT}%`, top, height }}
-      />
-      <div
-        className="pointer-events-none absolute h-0.5 bg-slate-700/90"
-        style={{ ...fadeStyle, [side]: `${MARGIN_INSET_PCT - TICK_LENGTH_PCT}%`, width: `${TICK_LENGTH_PCT}%`, top }}
-      />
-      <div
-        className="pointer-events-none absolute h-0.5 bg-slate-700/90"
-        style={{ ...fadeStyle, [side]: `${MARGIN_INSET_PCT - TICK_LENGTH_PCT}%`, width: `${TICK_LENGTH_PCT}%`, top: top + height }}
-      />
-    </>
+  const Tick = ({ side }) => (
+    <div
+      className="pointer-events-none absolute w-1 rounded-full bg-amber-300 shadow-[0_0_4px_rgba(0,0,0,.5)]"
+      style={{ ...fadeStyle, [side]: `${MARGIN_INSET_PCT}%`, top, height }}
+    />
   );
 
   return (
     <>
-      <Bracket side="left" />
-      <Bracket side="right" />
+      <Tick side="left" />
+      <Tick side="right" />
     </>
   );
 }
