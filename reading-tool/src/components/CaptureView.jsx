@@ -56,10 +56,11 @@ const TRIPLE_TAP_POSITION_THRESHOLD = 0.08;
 const RECENT_CAPTURE_WINDOW_MS = 20000;
 const MAX_RECENT_CAPTURES = 4;
 
-// How long the record button stays active after a capture, inviting a voice
-// note before it's assumed the passage is done (no audio). A recording that's
-// actually in progress isn't subject to this — it only gates *starting* one.
-const AUDIO_WINDOW_MS = 7000;
+// How long the record button (and the "Captured N" bubble) stays active
+// after a capture, inviting a voice note before it's assumed the passage is
+// done (no audio). A recording that's actually in progress isn't subject to
+// this — it only gates *starting* one.
+const AUDIO_WINDOW_MS = 3500;
 
 // How long the first-use hint stays on screen before fading on its own.
 const HINT_DISPLAY_MS = 3500;
@@ -154,12 +155,28 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
     onTitleRequestHandled?.();
   }, [titleRequest, onTitleRequestHandled]);
 
-  // Without this, switching away from Capture mid-window leaves the pending
-  // auto-close setTimeout running — it isn't tied to this component's
-  // lifetime otherwise, so it can later fire and dispatch audio-window-close
-  // (a global event) at the wrong time, incorrectly closing a completely
-  // different, later capture's window after remounting.
-  useEffect(() => () => clearTimeout(audioWindowTimerRef.current), []);
+  // Switching away from Capture mid-window (e.g. straight to Library right
+  // after a capture) used to just clear the pending auto-close timer and
+  // leave it at that — the timer would never fire, so capture-spree-saved
+  // never dispatched, and the Library icon never pulsed for that spree even
+  // though the passage itself saves fine in the background regardless. Now
+  // treats navigating away as ending the spree immediately: same signal a
+  // natural timeout would send, just early. Doesn't call closeAudioWindow
+  // itself, since that also touches this component's own state, which is
+  // pointless (and risky) to set on an already-unmounting component — only
+  // the ref flag and the two global events, which is everything that
+  // actually matters once this component is gone.
+  useEffect(
+    () => () => {
+      clearTimeout(audioWindowTimerRef.current);
+      if (spreeActiveRef.current) {
+        spreeActiveRef.current = false;
+        window.dispatchEvent(new CustomEvent('audio-window-close'));
+        window.dispatchEvent(new CustomEvent('capture-spree-saved'));
+      }
+    },
+    []
+  );
 
   const dismissHint = () => {
     localStorage.setItem(HINT_DISMISSED_KEY, 'true');
@@ -377,17 +394,30 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
   };
 
   // Removes the most-recently-captured passage and decrements the "Captured
-  // N" count. Dropping to zero ends the spree outright — nothing left to
-  // attach a voice note to, so there's no reason to keep the window open.
-  // The close-vs-decrement decision reads captureCount directly rather than
+  // N" count. Deliberately targets recentCapturesRef.current[0] — the exact
+  // in-memory record of the capture this bubble is for — rather than
+  // querying getPassages() for "whatever's newest in storage right now".
+  // The bubble opens optimistically before extraction/save even starts (see
+  // openAudioWindow), so a fast Undo tap can easily land before that save
+  // has landed in Supabase; querying live storage at that moment either
+  // finds nothing (first-ever capture: Undo silently no-ops, the passage
+  // saves moments later anyway) or — worse — deletes some unrelated,
+  // already-saved passage. Awaiting the tracked savedPromise instead always
+  // resolves to the right id, however early Undo is tapped.
+  // Dropping to zero ends the spree outright — nothing left to attach a
+  // voice note to, so there's no reason to keep the window open. The
+  // close-vs-decrement decision reads captureCount directly rather than
   // inside the setCaptureCount updater — updater functions must stay pure,
   // and closeAudioWindow has side effects (another setState, dispatching
   // window events).
   const undoLastCapture = async () => {
-    const latest = (await getPassages())[0];
-    if (!latest) return;
-    await deletePassage(latest.id);
-    window.dispatchEvent(new CustomEvent('passage-saved', { detail: { id: latest.id } }));
+    const pending = recentCapturesRef.current[0];
+    if (!pending) return;
+    const id = await pending.savedPromise;
+    recentCapturesRef.current = recentCapturesRef.current.filter((c) => c !== pending);
+    if (!id) return; // extraction/save already failed and rolled back itself — nothing to undo
+    await deletePassage(id);
+    window.dispatchEvent(new CustomEvent('passage-saved', { detail: { id } }));
     navigator.vibrate?.(10);
     if (captureCount <= 1) {
       // Deferred a tick: calling this synchronously right after the
