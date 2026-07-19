@@ -163,17 +163,6 @@ export default function LibraryView({ onRequestTitle, flashRequest }) {
     return <div className="h-full" />;
   }
 
-  if (passages.length === 0) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
-        <p className="text-lg text-parchment/70">No passages yet</p>
-        <p className="text-sm text-parchment/40">
-          Drag down over text in Capture to save your first one.
-        </p>
-      </div>
-    );
-  }
-
   const q = query.trim().toLowerCase();
   const matches = (p) => {
     const textMatch =
@@ -253,8 +242,13 @@ export default function LibraryView({ onRequestTitle, flashRequest }) {
       </div>
     );
 
+  // overflow-hidden matters here, not just cosmetic: SettingsDrawer sits
+  // off-screen to the right (translateX(100%)) when closed, and without
+  // this the browser will happily let a right-swipe anywhere in Library
+  // horizontally scroll the page to reveal it — opening "the menu" via a
+  // stray swipe instead of only the intended ⋮ button tap.
   return (
-    <div className="relative flex h-full flex-col">
+    <div className="relative flex h-full flex-col overflow-hidden">
       <div className="shrink-0 px-[18px] pt-[58px] pb-3">
         <div className="flex items-start justify-between">
           <div>
@@ -337,9 +331,19 @@ export default function LibraryView({ onRequestTitle, flashRequest }) {
         className="min-h-0 flex-1 overflow-y-auto px-[18px] pb-6 select-none [-webkit-touch-callout:none]"
         style={{ touchAction: 'pan-y' }}
       >
-        {!grouped && buildRenderItems(filtered).map(renderPassageOrStack)}
+        {passages.length === 0 && (
+          <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
+            <p className="text-lg text-parchment/70">No passages yet</p>
+            <p className="text-sm text-parchment/40">
+              Drag down over text in Capture to save your first one.
+            </p>
+          </div>
+        )}
 
-        {grouped &&
+        {passages.length > 0 && !grouped && buildRenderItems(filtered).map(renderPassageOrStack)}
+
+        {passages.length > 0 &&
+          grouped &&
           groupedEntries.map(([title, items]) => {
             const author = items.map((p) => p.sourceAuthor).find(Boolean) || null;
             const open = !!expandedGroups[title];
@@ -376,7 +380,7 @@ export default function LibraryView({ onRequestTitle, flashRequest }) {
             );
           })}
 
-        {filtered.length === 0 && (
+        {passages.length > 0 && filtered.length === 0 && (
           <div className="py-16 text-center">
             <p className="font-serif text-xl italic" style={{ color: 'rgb(var(--fg) / .7)' }}>
               Nothing matches that.
