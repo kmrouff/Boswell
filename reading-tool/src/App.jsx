@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import CaptureView from './components/CaptureView.jsx';
 import LibraryView from './components/LibraryView.jsx';
 import ChatView from './components/ChatView.jsx';
+import FeedbackOverlay from './components/FeedbackOverlay.jsx';
 import { applyThemeVars, resolveTheme, getStoredTheme, getStoredAccent, getStoredRadius } from './lib/theme.js';
 
 const TABS = [
@@ -41,6 +42,13 @@ const TABS = [
 
 const LIBRARY_PULSE_MS = 600;
 
+// Feedback trigger: two fingers held together, without much drift, for this
+// long — anywhere in the app. Deliberately not a labeled button; a button is
+// a different instinct than the fast/instinctive gestures the app already
+// uses (drag-to-capture, triple-tap-for-title).
+const FEEDBACK_HOLD_MS = 550;
+const FEEDBACK_MOVE_CANCEL_PX = 15;
+
 function App() {
   // Applied synchronously during the initial render (not in a useEffect), so
   // the very first paint already reflects the saved theme — avoids a flash
@@ -67,6 +75,8 @@ function App() {
   // passage: { id, key } or null — `key` lets repeat taps on the same
   // passage re-trigger the flash even though `id` didn't change.
   const [citeRequest, setCiteRequest] = useState(null);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const feedbackGestureRef = useRef({ timer: null, points: new Map() });
 
   useEffect(() => {
     const onPassageSaved = () => {
@@ -96,8 +106,62 @@ function App() {
     setActiveTab('library');
   };
 
+  // Global two-finger-hold detection for the feedback trigger. Tracked via a
+  // ref (not state) since touchmove fires often and shouldn't cause
+  // re-renders; only crossing into the held-and-triggered state touches
+  // React state. Cancels on a third finger, on drift past the threshold, or
+  // if the finger count drops below two before the hold completes.
+  const clearFeedbackTimer = () => {
+    clearTimeout(feedbackGestureRef.current.timer);
+    feedbackGestureRef.current.timer = null;
+  };
+
+  const handleFeedbackTouchStart = (e) => {
+    if (feedbackOpen) return;
+    if (e.touches.length !== 2) {
+      clearFeedbackTimer();
+      return;
+    }
+    feedbackGestureRef.current.points = new Map(
+      [...e.touches].map((t) => [t.identifier, { x: t.clientX, y: t.clientY }])
+    );
+    clearFeedbackTimer();
+    feedbackGestureRef.current.timer = setTimeout(() => {
+      feedbackGestureRef.current.timer = null;
+      navigator.vibrate?.([10, 30, 10]);
+      setFeedbackOpen(true);
+    }, FEEDBACK_HOLD_MS);
+  };
+
+  const handleFeedbackTouchMove = (e) => {
+    if (!feedbackGestureRef.current.timer) return;
+    if (e.touches.length !== 2) {
+      clearFeedbackTimer();
+      return;
+    }
+    for (const t of e.touches) {
+      const start = feedbackGestureRef.current.points.get(t.identifier);
+      if (!start) continue;
+      if (Math.hypot(t.clientX - start.x, t.clientY - start.y) > FEEDBACK_MOVE_CANCEL_PX) {
+        clearFeedbackTimer();
+        return;
+      }
+    }
+  };
+
+  const handleFeedbackTouchEnd = (e) => {
+    if (e.touches.length < 2) clearFeedbackTimer();
+  };
+
   return (
-    <div className="flex h-svh w-full flex-col" style={{ background: 'var(--bg)', color: 'rgb(var(--fg))' }}>
+    <div
+      className="flex h-svh w-full flex-col"
+      style={{ background: 'var(--bg)', color: 'rgb(var(--fg))' }}
+      onTouchStart={handleFeedbackTouchStart}
+      onTouchMove={handleFeedbackTouchMove}
+      onTouchEnd={handleFeedbackTouchEnd}
+      onTouchCancel={handleFeedbackTouchEnd}
+    >
       <main className="min-h-0 flex-1 overflow-y-auto">
         {activeTab === 'capture' && (
           <CaptureView
@@ -142,6 +206,8 @@ function App() {
           );
         })}
       </nav>
+
+      {feedbackOpen && <FeedbackOverlay view={activeTab} onClose={() => setFeedbackOpen(false)} />}
     </div>
   );
 }

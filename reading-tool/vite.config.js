@@ -2,6 +2,7 @@ import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import basicSsl from '@vitejs/plugin-basic-ssl'
 import claudeProxyHandler from './api/claude.js'
+import feedbackHandler from './api/feedback.js'
 
 // Camera access requires a secure context on real devices, so dev serves over
 // HTTPS (self-signed) by default. Automated preview tooling can't click through
@@ -16,25 +17,31 @@ const useHttps = process.env.VITE_DISABLE_HTTPS !== 'true'
 // injects its own configured env vars into process.env automatically.)
 Object.assign(process.env, loadEnv('development', process.cwd(), ''))
 
-// Mounts the same handler api/claude.js exports as a Vercel function onto
-// Vite's own dev server, so local dev (including phone testing over the
-// LAN) proxies through it too instead of calling Anthropic directly from
-// the client — one proxy implementation, two runtimes.
-const claudeProxyDevPlugin = () => ({
-  name: 'claude-proxy-dev',
+// Mounts the same handlers the api/*.js files export as Vercel functions
+// onto Vite's own dev server, so local dev (including phone testing over
+// the LAN) proxies through them too instead of calling Anthropic/Slack
+// directly from the client — one implementation per endpoint, two runtimes.
+const apiProxyDevPlugin = (routes) => ({
+  name: 'api-proxy-dev',
   configureServer(server) {
-    server.middlewares.use('/api/claude', (req, res) => {
-      claudeProxyHandler(req, res).catch((err) => {
-        res.writeHead(500, { 'content-type': 'application/json' })
-        res.end(JSON.stringify({ error: err.message || 'Proxy error' }))
+    for (const [path, handler] of Object.entries(routes)) {
+      server.middlewares.use(path, (req, res) => {
+        handler(req, res).catch((err) => {
+          res.writeHead(500, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ error: err.message || 'Proxy error' }))
+        })
       })
-    })
+    }
   },
 })
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), claudeProxyDevPlugin(), ...(useHttps ? [basicSsl()] : [])],
+  plugins: [
+    react(),
+    apiProxyDevPlugin({ '/api/claude': claudeProxyHandler, '/api/feedback': feedbackHandler }),
+    ...(useHttps ? [basicSsl()] : []),
+  ],
   server: {
     https: useHttps,
   },
