@@ -32,8 +32,6 @@ import {
   setCurrentSourceAuthor,
   getCurrentPage,
   setCurrentPage as persistCurrentPage,
-  isQuotaExceededError,
-  deleteOldestPassages,
 } from '../lib/storage.js';
 import { maybeMergeWithPrevious } from '../lib/continuation.js';
 import { isDictationSupported, startDictation } from '../lib/dictation.js';
@@ -57,10 +55,6 @@ const TRIPLE_TAP_POSITION_THRESHOLD = 0.08;
 // reading view), so it only compares against captures made moments ago.
 const RECENT_CAPTURE_WINDOW_MS = 20000;
 const MAX_RECENT_CAPTURES = 4;
-
-// How many of the oldest passages to drop when storage fills up, per tap
-// of the "Free up space" toast action.
-const QUOTA_FREE_COUNT = 20;
 
 // How long the record button stays active after a capture, inviting a voice
 // note before it's assumed the passage is done (no audio). A recording that's
@@ -256,9 +250,9 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
   // the current title mode targets — the global "working title" (tags future
   // captures) or a specific existing passage (from the Library "add title"
   // flow) — then exits.
-  const applyTitle = (title, author = null) => {
+  const applyTitle = async (title, author = null) => {
     if (titleMode?.target === 'passage') {
-      updatePassage(titleMode.passageId, { sourceTitle: title, sourceAuthor: author });
+      await updatePassage(titleMode.passageId, { sourceTitle: title, sourceAuthor: author });
       window.dispatchEvent(new CustomEvent('passage-saved', { detail: { id: titleMode.passageId } }));
     } else {
       setCurrentSourceTitle(title);
@@ -279,7 +273,7 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
   const reChopPrevious = (prev, chopLine, newIsLower) => {
     prev.savedPromise.then(async (prevId) => {
       if (!prevId) return;
-      const current = getPassage(prevId);
+      const current = await getPassage(prevId);
       if (!current) return;
       const newBounds = newIsLower
         ? { ...current.selectionBounds, yMax: Math.min(current.selectionBounds.yMax, chopLine) }
@@ -288,7 +282,7 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
         const recropped = await cropImageRegion(prev.cropDataUrl, prev.cropBounds, newBounds);
         const res = await extractPassage(recropped);
         if (res.error) return;
-        updatePassage(prevId, {
+        await updatePassage(prevId, {
           rawText: res.rawText,
           refinedText: res.refinedText,
           selectionBounds: newBounds,
@@ -363,42 +357,16 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
       isMerged: false,
       mergedFromIds: [],
       priority: false,
-      audioNote: null,
       audioTranscript: null,
       stackId,
     };
 
-    const saveResult = savePassage(passage);
+    const saveResult = await savePassage(passage);
 
     if (!saveResult.ok) {
-      if (isQuotaExceededError(saveResult.error)) {
-        // Not saved (yet) — roll back the optimistic bubble now rather than
-        // let it sit there implying success while storage is actually full.
-        // A successful retry re-opens it fresh below; savedPromise is left
-        // unresolved until then, since only a definitive failure resolves null.
-        rollbackOptimisticCapture(isNewSpree);
-        pushToast(
-          'Storage full — tap to free up space and retry',
-          () => {
-            deleteOldestPassages(QUOTA_FREE_COUNT);
-            const retry = savePassage(passage);
-            if (retry.ok) {
-              resolveSaved(passage.id);
-              window.dispatchEvent(new CustomEvent('passage-saved', { detail: { id: passage.id } }));
-              openAudioWindow(stackId, isNewSpree);
-              maybeMergeWithPrevious(passage);
-            } else {
-              resolveSaved(null);
-              pushToast("Still not enough space — delete more from the Library");
-            }
-          },
-          { actionLabel: 'Free up space', sticky: true }
-        );
-      } else {
-        resolveSaved(null);
-        rollbackOptimisticCapture(isNewSpree);
-        pushToast("Couldn't save that — try again");
-      }
+      resolveSaved(null);
+      rollbackOptimisticCapture(isNewSpree);
+      pushToast("Couldn't save that — try again");
       return;
     }
 
@@ -415,10 +383,10 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
   // inside the setCaptureCount updater — updater functions must stay pure,
   // and closeAudioWindow has side effects (another setState, dispatching
   // window events).
-  const undoLastCapture = () => {
-    const latest = getPassages()[0];
+  const undoLastCapture = async () => {
+    const latest = (await getPassages())[0];
     if (!latest) return;
-    deletePassage(latest.id);
+    await deletePassage(latest.id);
     window.dispatchEvent(new CustomEvent('passage-saved', { detail: { id: latest.id } }));
     navigator.vibrate?.(10);
     if (captureCount <= 1) {
@@ -468,9 +436,9 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
       // whatever was newest when recording started.
       closeAudioWindow(true);
       if (!transcript) return;
-      const latest = getPassages()[0];
+      const latest = (await getPassages())[0];
       if (!latest) return; // nothing to attach to anymore
-      updatePassage(latest.id, { audioTranscript: transcript, audioNote: null });
+      await updatePassage(latest.id, { audioTranscript: transcript });
       window.dispatchEvent(new CustomEvent('passage-saved', { detail: { id: latest.id } }));
       return;
     }

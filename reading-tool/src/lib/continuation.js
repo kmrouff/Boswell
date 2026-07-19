@@ -31,7 +31,7 @@ export const isCandidateContinuation = (prevPassage, newPassage) => {
 // entries (the safe default).
 export const maybeMergeWithPrevious = async (newPassage) => {
   try {
-    const passages = getPassages();
+    const passages = await getPassages();
     // newPassage was just unshifted onto the front, so index 1 is whatever
     // was most recently captured before it.
     const prevPassage = passages[1];
@@ -60,11 +60,10 @@ export const maybeMergeWithPrevious = async (newPassage) => {
       // mergedFromIds being empty, or a fresh passage's own id gets dropped.
       mergedFromIds: [...(prevPassage.isMerged ? prevPassage.mergedFromIds : [prevPassage.id]), newPassage.id],
       priority: prevPassage.priority || newPassage.priority || false,
-      audioNote: prevPassage.audioNote ?? newPassage.audioNote ?? null,
       audioTranscript: prevPassage.audioTranscript ?? newPassage.audioTranscript ?? null,
     };
 
-    replacePassages([prevPassage.id, newPassage.id], merged);
+    await replacePassages([prevPassage.id, newPassage.id], merged);
   } catch {
     // Fail silently and safely — leave both passages separate.
   }

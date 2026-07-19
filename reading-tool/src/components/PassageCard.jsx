@@ -120,11 +120,11 @@ export default function PassageCard({
     return () => clearTimeout(t);
   }, [flash]);
 
-  const savePage = () => {
+  const savePage = async () => {
     const trimmed = String(pageValue).trim();
-    updatePassage(passage.id, { pageNumber: trimmed || null });
     setEditingPage(false);
     setMenuOpen(false);
+    await updatePassage(passage.id, { pageNumber: trimmed || null });
     onChanged?.();
   };
 
@@ -143,7 +143,7 @@ export default function PassageCard({
       transcript = transcript.trim();
       setDictationText('');
       if (transcript) {
-        updatePassage(passage.id, { audioTranscript: transcript, audioNote: null });
+        await updatePassage(passage.id, { audioTranscript: transcript });
         onChanged?.();
       }
       setMenuOpen(false);
@@ -159,9 +159,9 @@ export default function PassageCard({
     }
   };
 
-  const togglePriority = () => {
-    updatePassage(passage.id, { priority: !passage.priority });
+  const togglePriority = async () => {
     onSwipeChange?.(null);
+    await updatePassage(passage.id, { priority: !passage.priority });
     onChanged?.();
   };
 

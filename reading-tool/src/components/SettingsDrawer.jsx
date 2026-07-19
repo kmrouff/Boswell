@@ -1,19 +1,27 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { THEMES, THEME_NAMES, getStoredTheme, setStoredTheme, applyThemeVars, resolveTheme, getStoredAccent, getStoredRadius } from '../lib/theme.js';
+import { supabase } from '../lib/supabaseClient.js';
 
 // Slides in from the right, covers the screen area (not the bottom nav —
 // the caller renders this inside the view's own relatively-positioned root,
 // which fills <main> only). Appearance is functional (switches the theme
 // app-wide instantly via CSS custom properties on the document root);
-// Support/Account are placeholders per the handoff spec.
+// Support is still a placeholder per the handoff spec.
 export default function SettingsDrawer({ open, onClose }) {
   const [activeTheme, setActiveTheme] = useState(() => getStoredTheme());
+  const [email, setEmail] = useState(null);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => setEmail(data.session?.user?.email ?? null));
+  }, []);
 
   const pickTheme = (name) => {
     setStoredTheme(name);
     setActiveTheme(name);
     applyThemeVars(resolveTheme(name, getStoredAccent(), getStoredRadius()));
   };
+
+  const logOut = () => supabase.auth.signOut();
 
   return (
     <>
@@ -109,21 +117,34 @@ export default function SettingsDrawer({ open, onClose }) {
         >
           Account
         </div>
-        {['Log in', 'Privacy policy'].map((label) => (
+        {email && (
           <div
-            key={label}
             className="flex items-center justify-between border-b py-3.5 font-sans text-sm"
-            style={{ borderColor: 'rgb(var(--fg) / .08)', color: 'rgb(var(--fg) / .4)' }}
+            style={{ borderColor: 'rgb(var(--fg) / .08)', color: 'rgb(var(--fg) / .85)' }}
           >
-            {label}
-            <span
-              className="rounded-full border px-2 py-0.5 text-[10px] tracking-wide uppercase"
-              style={{ borderColor: 'rgb(var(--fg) / .18)' }}
-            >
-              Soon
-            </span>
+            {email}
           </div>
-        ))}
+        )}
+        <button
+          type="button"
+          onClick={logOut}
+          className="flex w-full items-center justify-between border-0 border-b bg-transparent py-3.5 text-left font-sans text-sm"
+          style={{ borderColor: 'rgb(var(--fg) / .08)', color: 'rgb(var(--fg) / .85)' }}
+        >
+          Log out
+        </button>
+        <div
+          className="flex items-center justify-between border-b py-3.5 font-sans text-sm"
+          style={{ borderColor: 'rgb(var(--fg) / .08)', color: 'rgb(var(--fg) / .4)' }}
+        >
+          Privacy policy
+          <span
+            className="rounded-full border px-2 py-0.5 text-[10px] tracking-wide uppercase"
+            style={{ borderColor: 'rgb(var(--fg) / .18)' }}
+          >
+            Soon
+          </span>
+        </div>
       </div>
     </>
   );

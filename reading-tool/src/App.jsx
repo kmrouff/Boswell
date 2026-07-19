@@ -3,6 +3,8 @@ import CaptureView from './components/CaptureView.jsx';
 import LibraryView from './components/LibraryView.jsx';
 import ChatView from './components/ChatView.jsx';
 import FeedbackOverlay from './components/FeedbackOverlay.jsx';
+import LoginView from './components/LoginView.jsx';
+import { supabase, isSupabaseConfigured } from './lib/supabaseClient.js';
 import { applyThemeVars, resolveTheme, getStoredTheme, getStoredAccent, getStoredRadius } from './lib/theme.js';
 
 const TABS = [
@@ -77,6 +79,18 @@ function App() {
   const [citeRequest, setCiteRequest] = useState(null);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const feedbackGestureRef = useRef({ timer: null, points: new Map() });
+  // undefined = session not checked yet, null = checked and signed out,
+  // object = signed in.
+  const [session, setSession] = useState(undefined);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    const { data: subscription } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      setSession(newSession);
+    });
+    return () => subscription.subscription.unsubscribe();
+  }, []);
 
   useEffect(() => {
     // The dot's own small pop replays on every passage-saved (subtle, fine
@@ -161,6 +175,28 @@ function App() {
   const handleFeedbackTouchEnd = (e) => {
     if (e.touches.length < 2) clearFeedbackTimer();
   };
+
+  // Checking session is effectively instant against Supabase's local
+  // storage-cached token, but avoid a login-screen flash for that instant.
+  if (!isSupabaseConfigured) {
+    return (
+      <div
+        className="flex h-svh w-full flex-col items-center justify-center gap-2 px-8 text-center"
+        style={{ background: 'var(--bg)', color: 'rgb(var(--fg))' }}
+      >
+        <p className="font-serif text-lg">Supabase isn't configured yet</p>
+        <p className="font-sans text-sm" style={{ color: 'rgb(var(--fg) / .6)' }}>
+          Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to .env, then reload.
+        </p>
+      </div>
+    );
+  }
+  if (session === undefined) {
+    return <div className="h-svh w-full" style={{ background: 'var(--bg)' }} />;
+  }
+  if (session === null) {
+    return <LoginView />;
+  }
 
   return (
     <div

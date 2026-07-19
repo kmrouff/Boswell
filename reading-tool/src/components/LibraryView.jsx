@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { getPassages, deletePassage, insertPassageAt, updatePassage } from '../lib/storage.js';
+import { getPassages, savePassage, deletePassage, updatePassage } from '../lib/storage.js';
 import PassageCard, { HeartIcon } from './PassageCard.jsx';
 import StackedCard from './StackedCard.jsx';
 import SettingsDrawer from './SettingsDrawer.jsx';
@@ -44,7 +44,8 @@ function DotsIcon() {
 }
 
 export default function LibraryView({ onRequestTitle, flashRequest }) {
-  const [passages, setPassages] = useState(() => getPassages());
+  const [passages, setPassages] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
   const [favOnly, setFavOnly] = useState(false);
   const [grouped, setGrouped] = useState(false);
@@ -52,16 +53,20 @@ export default function LibraryView({ onRequestTitle, flashRequest }) {
   const [expandedStacks, setExpandedStacks] = useState({});
   const [swipedId, setSwipedId] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [deleted, setDeleted] = useState(null); // { passage, index }
+  const [deleted, setDeleted] = useState(null); // the removed passage, or null
   const [flashId, setFlashId] = useState(null);
   const [stackPickerFor, setStackPickerFor] = useState(null); // passage id or null
   const deleteTimerRef = useRef(null);
   const flashTimerRef = useRef(null);
 
+  const refresh = async () => setPassages(await getPassages());
+
   useEffect(() => {
-    const refresh = () => setPassages(getPassages());
-    window.addEventListener('passage-saved', refresh);
-    return () => window.removeEventListener('passage-saved', refresh);
+    refresh().finally(() => setLoading(false));
+    const onPassageSaved = () => refresh();
+    window.addEventListener('passage-saved', onPassageSaved);
+    return () => window.removeEventListener('passage-saved', onPassageSaved);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Citation jump from Chat: highlight the passage, and if it's hidden
@@ -69,17 +74,19 @@ export default function LibraryView({ onRequestTitle, flashRequest }) {
   // whichever of those it's inside so it's actually visible.
   useEffect(() => {
     if (!flashRequest) return;
-    const all = getPassages();
-    const target = all.find((p) => p.id === flashRequest.id);
-    if (!target) return;
-    if (grouped) {
-      const key = target.sourceTitle || MISC;
-      setExpandedGroups((g) => (g[key] ? g : { ...g, [key]: true }));
-    }
-    if (target.stackId && all.filter((p) => p.stackId === target.stackId).length >= 2) {
-      setExpandedStacks((s) => (s[target.stackId] ? s : { ...s, [target.stackId]: true }));
-    }
-    setFlashId(flashRequest.id);
+    (async () => {
+      const all = await getPassages();
+      const target = all.find((p) => p.id === flashRequest.id);
+      if (!target) return;
+      if (grouped) {
+        const key = target.sourceTitle || MISC;
+        setExpandedGroups((g) => (g[key] ? g : { ...g, [key]: true }));
+      }
+      if (target.stackId && all.filter((p) => p.stackId === target.stackId).length >= 2) {
+        setExpandedStacks((s) => (s[target.stackId] ? s : { ...s, [target.stackId]: true }));
+      }
+      setFlashId(flashRequest.id);
+    })();
     clearTimeout(flashTimerRef.current);
     flashTimerRef.current = setTimeout(() => setFlashId(null), 1700);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -87,43 +94,49 @@ export default function LibraryView({ onRequestTitle, flashRequest }) {
 
   useEffect(() => () => clearTimeout(deleteTimerRef.current), []);
 
-  const refresh = () => setPassages(getPassages());
-
+  // Optimistic — the card leaves the list immediately (swipe-to-delete needs
+  // to feel instant); the actual delete happens in the background rather
+  // than being awaited first.
   const handleDelete = (id) => {
-    const index = passages.findIndex((p) => p.id === id);
-    if (index < 0) return;
-    const passage = passages[index];
-    deletePassage(id);
+    const passage = passages.find((p) => p.id === id);
+    if (!passage) return;
     setPassages((prev) => prev.filter((p) => p.id !== id));
-    setDeleted({ passage, index });
+    setDeleted(passage);
     clearTimeout(deleteTimerRef.current);
     deleteTimerRef.current = setTimeout(() => setDeleted(null), UNDO_WINDOW_MS);
+    deletePassage(id);
   };
 
+  // Also optimistic, for the same reason — re-inserted at its correct
+  // chronological position immediately, with the actual save firing in the
+  // background.
   const undoDelete = () => {
     clearTimeout(deleteTimerRef.current);
     if (!deleted) return;
-    insertPassageAt(deleted.index, deleted.passage);
+    const restored = deleted;
     setDeleted(null);
-    refresh();
+    setPassages((prev) =>
+      [...prev, restored].sort((a, b) => new Date(b.capturedAt) - new Date(a.capturedAt))
+    );
+    savePassage(restored);
   };
 
   const toggleGroup = (title) => setExpandedGroups((g) => ({ ...g, [title]: !g[title] }));
   const toggleStack = (stackId) => setExpandedStacks((s) => ({ ...s, [stackId]: !s[stackId] }));
 
-  const unlinkFromStack = (id) => {
-    updatePassage(id, { stackId: null });
+  const unlinkFromStack = async (id) => {
+    await updatePassage(id, { stackId: null });
     refresh();
   };
 
   // Same-title passages this one could join into a stack — excludes itself
   // and anything already sharing its stackId, since those are already
-  // stacked together.
+  // stacked together. Reads from already-loaded state rather than
+  // refetching — this is called during render, which can't await.
   const stackCandidates = (id) => {
-    const all = getPassages();
-    const source = all.find((p) => p.id === id);
+    const source = passages.find((p) => p.id === id);
     if (!source?.sourceTitle) return [];
-    return all.filter(
+    return passages.filter(
       (p) => p.id !== id && p.sourceTitle === source.sourceTitle && !(source.stackId && p.stackId === source.stackId)
     );
   };
@@ -131,21 +144,24 @@ export default function LibraryView({ onRequestTitle, flashRequest }) {
   // Joins source and target into one stack. If either already belongs to a
   // stack, every member of that stack comes along too — so picking one card
   // from an existing 3-stack merges the whole 3 in, not just that one card.
-  const stackWith = (sourceId, targetId) => {
-    const all = getPassages();
-    const source = all.find((p) => p.id === sourceId);
-    const target = all.find((p) => p.id === targetId);
+  const stackWith = async (sourceId, targetId) => {
+    const source = passages.find((p) => p.id === sourceId);
+    const target = passages.find((p) => p.id === targetId);
     if (!source || !target) return;
     const finalStackId = source.stackId || target.stackId || uuidv4();
-    const sourceGroup = source.stackId ? all.filter((p) => p.stackId === source.stackId) : [source];
-    const targetGroup = target.stackId ? all.filter((p) => p.stackId === target.stackId) : [target];
+    const sourceGroup = source.stackId ? passages.filter((p) => p.stackId === source.stackId) : [source];
+    const targetGroup = target.stackId ? passages.filter((p) => p.stackId === target.stackId) : [target];
     const members = new Map([...sourceGroup, ...targetGroup].map((p) => [p.id, p]));
-    for (const p of members.values()) {
-      if (p.stackId !== finalStackId) updatePassage(p.id, { stackId: finalStackId });
-    }
+    await Promise.all(
+      [...members.values()].filter((p) => p.stackId !== finalStackId).map((p) => updatePassage(p.id, { stackId: finalStackId }))
+    );
     setExpandedStacks((s) => ({ ...s, [finalStackId]: true }));
     refresh();
   };
+
+  if (loading) {
+    return <div className="h-full" />;
+  }
 
   if (passages.length === 0) {
     return (

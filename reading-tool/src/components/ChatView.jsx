@@ -13,11 +13,12 @@ export default function ChatView({ onCiteJump }) {
   const [messages, setMessages] = useState([]); // { role, content, citation? }
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
-  const [passageCount, setPassageCount] = useState(() => getPassages().length);
+  const [passageCount, setPassageCount] = useState(0);
   const scrollRef = useRef(null);
 
   useEffect(() => {
-    const refresh = () => setPassageCount(getPassages().length);
+    const refresh = async () => setPassageCount((await getPassages()).length);
+    refresh();
     window.addEventListener('passage-saved', refresh);
     return () => window.removeEventListener('passage-saved', refresh);
   }, []);
@@ -39,7 +40,7 @@ export default function ChatView({ onCiteJump }) {
     try {
       const { citation } = await chatWithPassages(
         nextMessages.map((m) => ({ role: m.role, content: m.content })),
-        getPassages(),
+        await getPassages(),
         (_delta, displayText) => {
           setMessages((prev) => {
             const copy = [...prev];
