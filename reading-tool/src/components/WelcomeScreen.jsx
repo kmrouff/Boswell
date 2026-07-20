@@ -88,7 +88,7 @@ export default function WelcomeScreen({ onDone }) {
       {step === 2 && (
         <div className="flex w-full max-w-xs flex-col gap-2.5 text-left">
           <p className="mb-1 text-center font-serif text-base" style={{ color: 'rgb(var(--fg) / .75)' }}>
-            A few more things worth knowing:
+            You'll find these motions useful:
           </p>
           {GESTURES.map((g) => (
             <p key={g} className="font-sans text-sm leading-snug" style={{ color: 'rgb(var(--fg) / .65)' }}>
