@@ -63,16 +63,6 @@ function App() {
 
   const [activeTab, setActiveTab] = useState('capture');
   const [libraryPulsing, setLibraryPulsing] = useState(false);
-  // A small badge on the Library tab, on once a capture spree actually
-  // finishes (same "committed" signal as the big icon bounce below) — not
-  // while it's still pending, which used to read as "already saved" when it
-  // wasn't yet. Clears once the user actually taps into Library.
-  const [libraryDot, setLibraryDot] = useState(false);
-  // Bumped on every passage-saved (a capture, or a voice note landing on
-  // one) — used as the dot's React key so it remounts and its pop animation
-  // replays each time, instead of only playing once when the dot first
-  // appears.
-  const [pulseKey, setPulseKey] = useState(0);
   // A request from the Library to (re)set a passage's title, routed to the
   // Capture view's title mode: { passageId } or null.
   const [titleRequest, setTitleRequest] = useState(null);
@@ -97,25 +87,16 @@ function App() {
   }, []);
 
   useEffect(() => {
-    // The dot's own small pop replays on every passage-saved (subtle, fine
-    // to be chatty). The big nav-icon bounce is reserved for a capture
-    // spree actually finishing — see CaptureView's closeAudioWindow — so it
-    // reads as "this batch is now saved," not one bounce per capture.
-    const onPassageSaved = () => {
-      setPulseKey((k) => k + 1);
-    };
+    // The only Library-tab confirmation now: a brief icon bounce, reserved
+    // for a capture spree actually finishing — see CaptureView's
+    // closeAudioWindow — not one per individual capture, so it reads as
+    // "this batch is now saved," not a flicker on every drag.
     const onCaptureSpreeSaved = () => {
       setLibraryPulsing(true);
       setTimeout(() => setLibraryPulsing(false), LIBRARY_PULSE_MS);
-      setPulseKey((k) => k + 1);
-      setLibraryDot(true);
     };
-    window.addEventListener('passage-saved', onPassageSaved);
     window.addEventListener('capture-spree-saved', onCaptureSpreeSaved);
-    return () => {
-      window.removeEventListener('passage-saved', onPassageSaved);
-      window.removeEventListener('capture-spree-saved', onCaptureSpreeSaved);
-    };
+    return () => window.removeEventListener('capture-spree-saved', onCaptureSpreeSaved);
   }, []);
 
   // Settings' "Send feedback" row triggers the same overlay as the two-finger
@@ -241,10 +222,7 @@ function App() {
             <button
               key={id}
               type="button"
-              onClick={() => {
-                setActiveTab(id);
-                if (id === 'library') setLibraryDot(false);
-              }}
+              onClick={() => setActiveTab(id)}
               className="relative flex flex-1 flex-col items-center gap-1 border-none bg-transparent py-1.5 font-sans transition-transform duration-200"
               style={{
                 color: active || pulsing ? 'rgb(var(--acc))' : 'rgb(var(--fg) / .4)',
@@ -253,13 +231,6 @@ function App() {
             >
               {icon}
               <span className="text-[11px] font-semibold">{label}</span>
-              {id === 'library' && libraryDot && (
-                <span
-                  key={pulseKey}
-                  className="animate-badge-pop absolute h-2.5 w-2.5 rounded-full bg-amber-400"
-                  style={{ top: 2, left: 'calc(50% + 7px)', boxShadow: '0 0 0 2px var(--bg)' }}
-                />
-              )}
             </button>
           );
         })}

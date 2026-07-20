@@ -60,7 +60,17 @@ const MAX_RECENT_CAPTURES = 4;
 // after a capture, inviting a voice note before it's assumed the passage is
 // done (no audio). A recording that's actually in progress isn't subject to
 // this — it only gates *starting* one.
-const AUDIO_WINDOW_MS = 3000;
+const AUDIO_WINDOW_MS = 3250;
+
+// Once a voice note actually attaches, the window gets a short fresh tail
+// instead of closing immediately — long enough to see the confirmation, short
+// because there's nothing left to decide at that point.
+const AUDIO_ATTACHED_TAIL_MS = 2000;
+
+// How long the "Captured N" bubble's shrink-to-a-dot exit animation takes —
+// the bubble stays mounted (see bubbleClosing) for this long after the
+// window closes so it can actually play, rather than just vanishing.
+const BUBBLE_COLLAPSE_MS = 350;
 
 // How long the first-use hint stays on screen before fading on its own.
 const HINT_DISPLAY_MS = 3500;
@@ -79,7 +89,11 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
   // Mirrors isRecording for reads inside performCapture, which is async and
   // can otherwise close over a stale value from before an await resolved.
   const isRecordingRef = useRef(false);
+  // Counts down to the window auto-closing (see openAudioWindow) — distinct
+  // from bubbleCloseTimerRef below, which is a separate, shorter timer for
+  // the exit-animation tail once closing has already started.
   const audioWindowTimerRef = useRef(null);
+  const bubbleCloseTimerRef = useRef(null);
   // Whether the current audio window represents an ongoing multi-capture
   // spree, and which stackId ties its captures together in the Library.
   const spreeActiveRef = useRef(false);
@@ -98,6 +112,15 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
   // recording) — gates whether the record button is active and the
   // "Captured N" bubble is showing. See openAudioWindow below.
   const [audioWindowOpen, setAudioWindowOpen] = useState(false);
+  // True for BUBBLE_COLLAPSE_MS while the bubble plays its shrink-to-a-dot
+  // exit animation — the bubble stays rendered (audioWindowOpen ||
+  // bubbleClosing) for that stretch instead of vanishing the instant the
+  // window closes.
+  const [bubbleClosing, setBubbleClosing] = useState(false);
+  // Whether the most recent capture in this spree has a voice note attached
+  // yet — shows a light colored outline on the bubble as a hint, and is
+  // cleared the moment a fresh (unrelated) capture lands.
+  const [audioAttached, setAudioAttached] = useState(false);
   // How many captures have landed in the current spree — shown in the
   // "Captured N" bubble, which is visible for exactly as long as
   // audioWindowOpen is (they're the same window, just two facets of it).
@@ -169,6 +192,7 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
   useEffect(
     () => () => {
       clearTimeout(audioWindowTimerRef.current);
+      clearTimeout(bubbleCloseTimerRef.current);
       if (spreeActiveRef.current) {
         spreeActiveRef.current = false;
         window.dispatchEvent(new CustomEvent('capture-spree-saved'));
@@ -205,7 +229,10 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
   // would risk cutting off an active recording).
   const openAudioWindow = (stackId, isNewSpree) => {
     clearTimeout(audioWindowTimerRef.current);
+    clearTimeout(bubbleCloseTimerRef.current);
     setAudioWindowOpen(true);
+    setBubbleClosing(false);
+    setAudioAttached(false); // a fresh capture never already has audio on it
     spreeActiveRef.current = true;
     spreeStackIdRef.current = stackId;
     setCaptureCount((c) => (isNewSpree ? 1 : c + 1));
@@ -219,11 +246,21 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
   // `committed` distinguishes "the spree finished naturally (timeout or a
   // recording wrapped up) — pulse the Library icon to say it's saved" from
   // "the user undid their way back to zero captures — nothing to celebrate."
+  // Plays the bubble's collapse animation first and only actually hides it
+  // (and fires the Library pulse) once that's had time to finish, rather
+  // than snapping it away the instant the window closes.
   const closeAudioWindow = (committed) => {
     clearTimeout(audioWindowTimerRef.current);
     spreeActiveRef.current = false;
-    setAudioWindowOpen(false);
-    if (committed) window.dispatchEvent(new CustomEvent('capture-spree-saved'));
+    setBubbleClosing(true);
+    clearTimeout(bubbleCloseTimerRef.current);
+    bubbleCloseTimerRef.current = setTimeout(() => {
+      bubbleCloseTimerRef.current = null;
+      setAudioWindowOpen(false);
+      setBubbleClosing(false);
+      setAudioAttached(false);
+      if (committed) window.dispatchEvent(new CustomEvent('capture-spree-saved'));
+    }, BUBBLE_COLLAPSE_MS);
   };
 
   // Undoes an optimistic openAudioWindow call for a capture that turned out
@@ -461,12 +498,27 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
       // Whatever passage is newest right now "wins" the note — if another
       // drag happened while this recording was running, it's that one, not
       // whatever was newest when recording started.
-      closeAudioWindow(true);
-      if (!transcript) return;
+      if (!transcript) {
+        closeAudioWindow(true);
+        return;
+      }
       const latest = (await getPassages())[0];
-      if (!latest) return; // nothing to attach to anymore
+      if (!latest) {
+        closeAudioWindow(true); // nothing to attach to anymore
+        return;
+      }
       await updatePassage(latest.id, { audioTranscript: transcript });
       window.dispatchEvent(new CustomEvent('passage-saved', { detail: { id: latest.id } }));
+      // A short fresh tail instead of closing right away, so the
+      // attached-audio outline actually gets seen — same auto-close
+      // mechanism as openAudioWindow, just shorter, since there's nothing
+      // left to decide once it fires.
+      setAudioAttached(true);
+      clearTimeout(audioWindowTimerRef.current);
+      audioWindowTimerRef.current = setTimeout(() => {
+        audioWindowTimerRef.current = null;
+        closeAudioWindow(true);
+      }, AUDIO_ATTACHED_TAIL_MS);
       return;
     }
 
@@ -551,12 +603,23 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
     if (!hintDismissed) dismissHint();
   };
 
+  // Tracked as just [start, current] rather than a growing history of every
+  // point along the way — so the live selection is always the span between
+  // where the finger started and where it is *right now*, not the widest
+  // extent it's ever reached. That's what lets dragging back up retrace and
+  // shrink the selection instead of it only ever growing: the moment the
+  // finger crosses back over already-covered ground, "current" retreats and
+  // the far edge follows it in, live. computeSelectionBounds/rawBoundsOf/
+  // isMeaningfulDrag all just take min/max over whatever's in this array, so
+  // a 2-element array works unchanged — no other consumer needs per-point
+  // history (touchPath is otherwise only ever stored, never read back).
   const handleTouchMove = (e) => {
     if (titleMode) return;
     const touch = e.touches[0];
     const rect = containerRef.current.getBoundingClientRect();
     const point = normalizePoint(touch.clientX, touch.clientY, rect);
-    touchPathRef.current.push({ ...point, t: performance.now() - startTimeRef.current });
+    const start = touchPathRef.current[0];
+    touchPathRef.current = [start, { ...point, t: performance.now() - startTimeRef.current }];
     const ys = touchPathRef.current.map((p) => p.y);
     setDragBounds({ min: Math.min(...ys), max: Math.max(...ys) });
   };
@@ -702,13 +765,22 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
           drag actually landed, replacing a delayed toast. Sits on the same
           row as the Page indicator and record button (bottom-[38px], h-9 —
           matches PageIndicator's own centering against the record button's
-          center), just above the tab bar. Visible for exactly as long as
-          the record button is active (same window — see
-          openAudioWindow/closeAudioWindow); fades away once the spree goes
-          idle, at which point the Library icon pulses instead to say it's
-          now fully saved. */}
-      {!cameraError && !titleMode && audioWindowOpen && captureCount > 0 && (
-        <div className="absolute bottom-[38px] left-1/2 z-20 flex -translate-x-1/2 items-center gap-2">
+          center), just above the tab bar. Visible for as long as the record
+          button is active, plus BUBBLE_COLLAPSE_MS more while it plays its
+          shrink-to-a-dot exit (bubbleClosing) — only once that's done does
+          the Library icon pulse, via closeAudioWindow's own delayed dispatch.
+          A light red outline appears once a voice note actually attaches
+          (audioAttached), cleared the moment a fresh, unrelated capture
+          starts a new spree. */}
+      {!cameraError && !titleMode && (audioWindowOpen || bubbleClosing) && captureCount > 0 && (
+        <div
+          className="absolute bottom-[38px] left-1/2 z-20 flex items-center gap-2"
+          style={{
+            transform: `translateX(-50%) scale(${bubbleClosing ? 0.15 : 1})`,
+            opacity: bubbleClosing ? 0 : 1,
+            transition: `transform ${BUBBLE_COLLAPSE_MS}ms ease-in, opacity ${BUBBLE_COLLAPSE_MS}ms ease-in`,
+          }}
+        >
           <button
             type="button"
             onClick={undoLastCapture}
@@ -717,7 +789,10 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
           >
             <span className="text-lg leading-none">↺</span>
           </button>
-          <div className="flex h-9 items-center rounded-full bg-black/60 px-4 text-sm text-parchment">
+          <div
+            className="flex h-9 items-center rounded-full bg-black/60 px-4 text-sm text-parchment"
+            style={audioAttached ? { boxShadow: '0 0 0 1.5px rgb(248 113 113 / .85)' } : undefined}
+          >
             Captured {captureCount}
           </div>
         </div>
