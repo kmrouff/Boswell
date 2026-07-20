@@ -60,7 +60,7 @@ const MAX_RECENT_CAPTURES = 4;
 // after a capture, inviting a voice note before it's assumed the passage is
 // done (no audio). A recording that's actually in progress isn't subject to
 // this — it only gates *starting* one.
-const AUDIO_WINDOW_MS = 3500;
+const AUDIO_WINDOW_MS = 3000;
 
 // How long the first-use hint stays on screen before fading on its own.
 const HINT_DISPLAY_MS = 3500;
@@ -95,8 +95,8 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
   const [isRecording, setIsRecording] = useState(false);
   const [dictationText, setDictationText] = useState('');
   // Open for AUDIO_WINDOW_MS after a capture (indefinitely while actually
-  // recording) — gates whether the record button is active, and whether the
-  // Library nav badge is showing. See openAudioWindow below.
+  // recording) — gates whether the record button is active and the
+  // "Captured N" bubble is showing. See openAudioWindow below.
   const [audioWindowOpen, setAudioWindowOpen] = useState(false);
   // How many captures have landed in the current spree — shown in the
   // "Captured N" bubble, which is visible for exactly as long as
@@ -164,14 +164,13 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
   // natural timeout would send, just early. Doesn't call closeAudioWindow
   // itself, since that also touches this component's own state, which is
   // pointless (and risky) to set on an already-unmounting component — only
-  // the ref flag and the two global events, which is everything that
+  // the ref flag and the one global event, which is everything that
   // actually matters once this component is gone.
   useEffect(
     () => () => {
       clearTimeout(audioWindowTimerRef.current);
       if (spreeActiveRef.current) {
         spreeActiveRef.current = false;
-        window.dispatchEvent(new CustomEvent('audio-window-close'));
         window.dispatchEvent(new CustomEvent('capture-spree-saved'));
       }
     },
@@ -210,7 +209,6 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
     spreeActiveRef.current = true;
     spreeStackIdRef.current = stackId;
     setCaptureCount((c) => (isNewSpree ? 1 : c + 1));
-    window.dispatchEvent(new CustomEvent('audio-window-open'));
     if (isRecordingRef.current) return;
     audioWindowTimerRef.current = setTimeout(() => {
       audioWindowTimerRef.current = null;
@@ -225,7 +223,6 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
     clearTimeout(audioWindowTimerRef.current);
     spreeActiveRef.current = false;
     setAudioWindowOpen(false);
-    window.dispatchEvent(new CustomEvent('audio-window-close'));
     if (committed) window.dispatchEvent(new CustomEvent('capture-spree-saved'));
   };
 

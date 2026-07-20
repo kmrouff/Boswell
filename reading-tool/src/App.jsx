@@ -63,8 +63,10 @@ function App() {
 
   const [activeTab, setActiveTab] = useState('capture');
   const [libraryPulsing, setLibraryPulsing] = useState(false);
-  // A small persistent badge on the Library tab, on for as long as Capture's
-  // record button is in its post-capture "add a voice note?" window.
+  // A small badge on the Library tab, on once a capture spree actually
+  // finishes (same "committed" signal as the big icon bounce below) — not
+  // while it's still pending, which used to read as "already saved" when it
+  // wasn't yet. Clears once the user actually taps into Library.
   const [libraryDot, setLibraryDot] = useState(false);
   // Bumped on every passage-saved (a capture, or a voice note landing on
   // one) — used as the dot's React key so it remounts and its pop animation
@@ -106,18 +108,13 @@ function App() {
       setLibraryPulsing(true);
       setTimeout(() => setLibraryPulsing(false), LIBRARY_PULSE_MS);
       setPulseKey((k) => k + 1);
+      setLibraryDot(true);
     };
-    const onAudioWindowOpen = () => setLibraryDot(true);
-    const onAudioWindowClose = () => setLibraryDot(false);
     window.addEventListener('passage-saved', onPassageSaved);
     window.addEventListener('capture-spree-saved', onCaptureSpreeSaved);
-    window.addEventListener('audio-window-open', onAudioWindowOpen);
-    window.addEventListener('audio-window-close', onAudioWindowClose);
     return () => {
       window.removeEventListener('passage-saved', onPassageSaved);
       window.removeEventListener('capture-spree-saved', onCaptureSpreeSaved);
-      window.removeEventListener('audio-window-open', onAudioWindowOpen);
-      window.removeEventListener('audio-window-close', onAudioWindowClose);
     };
   }, []);
 
@@ -244,7 +241,10 @@ function App() {
             <button
               key={id}
               type="button"
-              onClick={() => setActiveTab(id)}
+              onClick={() => {
+                setActiveTab(id);
+                if (id === 'library') setLibraryDot(false);
+              }}
               className="relative flex flex-1 flex-col items-center gap-1 border-none bg-transparent py-1.5 font-sans transition-transform duration-200"
               style={{
                 color: active || pulsing ? 'rgb(var(--acc))' : 'rgb(var(--fg) / .4)',
