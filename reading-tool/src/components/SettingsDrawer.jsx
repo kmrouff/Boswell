@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { THEMES, THEME_NAMES, getStoredTheme, setStoredTheme, applyThemeVars, resolveTheme, getStoredAccent, getStoredRadius } from '../lib/theme.js';
 import { supabase } from '../lib/supabaseClient.js';
-import { resetWelcomeSeen } from './WelcomeScreen.jsx';
 
 const CONTACT_EMAIL = 'kevinrouff@gmail.com';
 
@@ -53,17 +52,19 @@ export default function SettingsDrawer({ open, onClose }) {
     applyThemeVars(resolveTheme(name, getStoredAccent(), getStoredRadius()));
   };
 
-  // TEMP, testing-only: also resets the welcome screen so it re-triggers on
-  // the next sign-in instead of only ever showing once per browser — makes
-  // it easy to re-check during onboarding iteration. Revert once settled.
-  const logOut = () => {
-    resetWelcomeSeen();
-    supabase.auth.signOut();
-  };
+  const logOut = () => supabase.auth.signOut();
 
   const openFeedback = () => {
     onClose();
     window.dispatchEvent(new CustomEvent('open-feedback'));
+  };
+
+  // TEMP, testing-only: lets the welcome screen be reviewed on demand
+  // instead of only ever once per browser. Revert once onboarding is
+  // settled.
+  const previewWelcome = () => {
+    onClose();
+    window.dispatchEvent(new CustomEvent('preview-welcome'));
   };
 
   const panelTitle = panel === 'mission' ? 'Mission' : panel === 'privacy' ? 'Privacy' : 'Settings';
@@ -228,6 +229,16 @@ export default function SettingsDrawer({ open, onClose }) {
               Contact us
               <span style={{ color: 'rgb(var(--fg) / .3)' }} className="text-lg">›</span>
             </a>
+            {/* TEMP, testing-only — remove once onboarding is settled. */}
+            <button
+              type="button"
+              onClick={previewWelcome}
+              className="flex w-full items-center justify-between border-0 border-b bg-transparent py-3.5 text-left font-sans text-sm"
+              style={{ borderColor: 'rgb(var(--fg) / .08)', color: 'rgb(var(--fg) / .85)' }}
+            >
+              Preview welcome screen
+              <span style={{ color: 'rgb(var(--fg) / .3)' }} className="text-lg">›</span>
+            </button>
 
             <div className="my-6 h-px" style={{ background: 'rgb(var(--fg) / .1)' }} />
 

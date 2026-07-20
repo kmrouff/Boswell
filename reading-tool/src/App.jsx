@@ -80,6 +80,10 @@ function App() {
   const [citeRequest, setCiteRequest] = useState(null);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [welcomed, setWelcomed] = useState(() => hasSeenWelcome());
+  // TEMP, testing-only: shows the welcome screen on demand (see
+  // SettingsDrawer's "Preview welcome screen") without touching the real
+  // once-ever flag. Revert alongside that once onboarding is settled.
+  const [previewingWelcome, setPreviewingWelcome] = useState(false);
   const feedbackGestureRef = useRef({ timer: null, points: new Map() });
   // undefined = session not checked yet, null = checked and signed out,
   // object = signed in.
@@ -90,11 +94,6 @@ function App() {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
     const { data: subscription } = supabase.auth.onAuthStateChange((_event, newSession) => {
       setSession(newSession);
-      // TEMP, testing-only: `welcomed`'s useState initializer only ever runs
-      // once on mount, so SettingsDrawer's resetWelcomeSeen() clearing
-      // localStorage wouldn't otherwise be reflected here without a full
-      // reload. Revert alongside resetWelcomeSeen once onboarding is settled.
-      if (_event === 'SIGNED_OUT') setWelcomed(hasSeenWelcome());
     });
     return () => subscription.subscription.unsubscribe();
   }, []);
@@ -119,6 +118,14 @@ function App() {
     const onOpenFeedback = () => setFeedbackOpen(true);
     window.addEventListener('open-feedback', onOpenFeedback);
     return () => window.removeEventListener('open-feedback', onOpenFeedback);
+  }, []);
+
+  // TEMP, testing-only — remove alongside previewingWelcome above once
+  // onboarding is settled.
+  useEffect(() => {
+    const onPreviewWelcome = () => setPreviewingWelcome(true);
+    window.addEventListener('preview-welcome', onPreviewWelcome);
+    return () => window.removeEventListener('preview-welcome', onPreviewWelcome);
   }, []);
 
   const requestTitleForPassage = (passageId) => {
@@ -199,8 +206,15 @@ function App() {
   if (session === null) {
     return <LoginView />;
   }
-  if (!welcomed) {
-    return <WelcomeScreen onDone={() => setWelcomed(true)} />;
+  if (!welcomed || previewingWelcome) {
+    return (
+      <WelcomeScreen
+        onDone={() => {
+          setWelcomed(true);
+          setPreviewingWelcome(false);
+        }}
+      />
+    );
   }
 
   return (
