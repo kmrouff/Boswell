@@ -43,7 +43,10 @@ const TABS = [
   },
 ];
 
-const LIBRARY_PULSE_MS = 600;
+// How long the Library tab's dot stays fully grown-in before it starts
+// shrinking away again — separate from the transition durations themselves,
+// which are set inline alongside the dot's style.
+const LIBRARY_DOT_VISIBLE_MS = 1300;
 
 // Feedback trigger: two fingers held together, without much drift, for this
 // long — anywhere in the app. Deliberately not a labeled button; a button is
@@ -62,7 +65,12 @@ function App() {
   });
 
   const [activeTab, setActiveTab] = useState('capture');
-  const [libraryPulsing, setLibraryPulsing] = useState(false);
+  // Whether the Library tab's dot is in its grown-in/visible state — always
+  // rendered (see the nav markup below), just scaled/faded to nothing at
+  // rest, so toggling this plays a smooth grow+fade-in or shrink+fade-out
+  // rather than the dot just appearing/disappearing instantly.
+  const [libraryDotOn, setLibraryDotOn] = useState(false);
+  const libraryDotTimerRef = useRef(null);
   // A request from the Library to (re)set a passage's title, routed to the
   // Capture view's title mode: { passageId } or null.
   const [titleRequest, setTitleRequest] = useState(null);
@@ -87,13 +95,14 @@ function App() {
   }, []);
 
   useEffect(() => {
-    // The only Library-tab confirmation now: a brief icon bounce, reserved
-    // for a capture spree actually finishing — see CaptureView's
-    // closeAudioWindow — not one per individual capture, so it reads as
-    // "this batch is now saved," not a flicker on every drag.
+    // The only Library-tab confirmation now: a dot that grows/fades in, then
+    // shrinks/fades away — reserved for a capture spree actually finishing
+    // (see CaptureView's closeAudioWindow), not one per individual capture,
+    // so it reads as "this batch is now saved," not a flicker on every drag.
     const onCaptureSpreeSaved = () => {
-      setLibraryPulsing(true);
-      setTimeout(() => setLibraryPulsing(false), LIBRARY_PULSE_MS);
+      clearTimeout(libraryDotTimerRef.current);
+      setLibraryDotOn(true);
+      libraryDotTimerRef.current = setTimeout(() => setLibraryDotOn(false), LIBRARY_DOT_VISIBLE_MS);
     };
     window.addEventListener('capture-spree-saved', onCaptureSpreeSaved);
     return () => window.removeEventListener('capture-spree-saved', onCaptureSpreeSaved);
@@ -217,20 +226,31 @@ function App() {
       >
         {TABS.map(({ id, label, icon }) => {
           const active = activeTab === id;
-          const pulsing = id === 'library' && libraryPulsing;
           return (
             <button
               key={id}
               type="button"
               onClick={() => setActiveTab(id)}
-              className="relative flex flex-1 flex-col items-center gap-1 border-none bg-transparent py-1.5 font-sans transition-transform duration-200"
-              style={{
-                color: active || pulsing ? 'rgb(var(--acc))' : 'rgb(var(--fg) / .4)',
-                transform: pulsing ? 'scale(1.1)' : 'scale(1)',
-              }}
+              className="relative flex flex-1 flex-col items-center gap-1 border-none bg-transparent py-1.5 font-sans"
+              style={{ color: active ? 'rgb(var(--acc))' : 'rgb(var(--fg) / .4)' }}
             >
               {icon}
               <span className="text-[11px] font-semibold">{label}</span>
+              {id === 'library' && (
+                <span
+                  className="absolute h-2.5 w-2.5 rounded-full bg-amber-400"
+                  style={{
+                    top: 2,
+                    left: 'calc(50% + 7px)',
+                    boxShadow: '0 0 0 2px var(--bg)',
+                    transform: `scale(${libraryDotOn ? 1 : 0})`,
+                    opacity: libraryDotOn ? 1 : 0,
+                    transition: libraryDotOn
+                      ? 'transform 280ms cubic-bezier(.34,1.56,.64,1), opacity 200ms ease-out'
+                      : 'transform 260ms ease-in, opacity 260ms ease-in',
+                  }}
+                />
+              )}
             </button>
           );
         })}
