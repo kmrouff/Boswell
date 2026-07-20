@@ -84,7 +84,7 @@ export default function FeedbackOverlay({ view, onClose }) {
         value={message}
         onChange={(e) => setMessage(e.target.value)}
         placeholder="What's on your mind?"
-        className="mt-6 min-h-[140px] flex-1 resize-none rounded-lg border border-parchment/20 bg-transparent p-3 font-serif text-lg text-parchment placeholder:text-parchment/30 focus:border-amber-300/60 focus:outline-none"
+        className="mt-6 h-28 shrink-0 resize-none rounded-lg border border-parchment/20 bg-transparent p-3 font-serif text-lg text-parchment placeholder:text-parchment/30 focus:border-amber-300/60 focus:outline-none"
       />
 
       {recording && (
