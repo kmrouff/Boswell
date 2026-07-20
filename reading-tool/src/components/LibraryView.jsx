@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { getPassages, savePassage, deletePassage, updatePassage } from '../lib/storage.js';
+import { getPendingCaptures } from '../lib/pendingCaptures.js';
 import PassageCard, { HeartIcon } from './PassageCard.jsx';
 import StackedCard from './StackedCard.jsx';
 import PendingPassageCard from './PendingPassageCard.jsx';
@@ -57,12 +58,16 @@ export default function LibraryView({ onRequestTitle, flashRequest }) {
   const [deleted, setDeleted] = useState(null); // the removed passage, or null
   const [flashId, setFlashId] = useState(null);
   const [stackPickerFor, setStackPickerFor] = useState(null); // passage id or null
-  // Placeholder cards for captures still being read/saved — shown the
-  // instant a drag is recognized (see CaptureView's 'passage-pending'
-  // dispatch), well before the real passage exists, so Library never looks
-  // like a capture "didn't work" during the few-second extraction round
-  // trip. { id, stackId, capturedAt }[].
-  const [pending, setPending] = useState([]);
+  // Placeholder cards for captures still being read/saved, so Library never
+  // looks like a capture "didn't work" during the few-second extraction
+  // round trip. Backed by lib/pendingCaptures.js, not a plain window event —
+  // a capture only ever starts while CaptureView is mounted (Capture tab
+  // active), which means LibraryView is *always* unmounted at that moment
+  // and only mounts fresh once the user switches tabs. A plain event fired
+  // in the meantime would already have gone unheard; reading the module's
+  // current state in this lazy initializer catches anything already in
+  // flight by the time this component exists to ask.
+  const [pending, setPending] = useState(() => getPendingCaptures());
   const deleteTimerRef = useRef(null);
   const flashTimerRef = useRef(null);
 
@@ -70,24 +75,15 @@ export default function LibraryView({ onRequestTitle, flashRequest }) {
 
   useEffect(() => {
     refresh().finally(() => setLoading(false));
-    // A pending capture resolves one of two ways: passage-saved (the real
-    // passage now exists — same id as the placeholder, since CaptureView
-    // generates it upfront) or passage-pending-cleared (it failed, or the
-    // user hit Undo before it landed) — either way the placeholder comes out.
-    const onPassageSaved = (e) => {
-      if (e.detail?.id) setPending((prev) => prev.filter((p) => p.id !== e.detail.id));
-      refresh();
-    };
-    const onPassagePending = (e) => setPending((prev) => [e.detail, ...prev]);
-    const onPassagePendingCleared = (e) =>
-      setPending((prev) => prev.filter((p) => p.id !== e.detail.id));
+    const onPassageSaved = () => refresh();
+    // Fires on every add/remove — re-reads the module's current list rather
+    // than trying to reconstruct the diff locally.
+    const onPendingChanged = () => setPending(getPendingCaptures());
     window.addEventListener('passage-saved', onPassageSaved);
-    window.addEventListener('passage-pending', onPassagePending);
-    window.addEventListener('passage-pending-cleared', onPassagePendingCleared);
+    window.addEventListener('pending-captures-changed', onPendingChanged);
     return () => {
       window.removeEventListener('passage-saved', onPassageSaved);
-      window.removeEventListener('passage-pending', onPassagePending);
-      window.removeEventListener('passage-pending-cleared', onPassagePendingCleared);
+      window.removeEventListener('pending-captures-changed', onPendingChanged);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

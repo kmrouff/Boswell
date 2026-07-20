@@ -35,6 +35,7 @@ import {
 } from '../lib/storage.js';
 import { maybeMergeWithPrevious } from '../lib/continuation.js';
 import { isDictationSupported, startDictation } from '../lib/dictation.js';
+import { addPendingCapture, removePendingCapture } from '../lib/pendingCaptures.js';
 
 const HINT_DISMISSED_KEY = 'capture_hint_dismissed';
 
@@ -386,7 +387,7 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
     if (result.error) {
       resolveSaved(null);
       rollbackOptimisticCapture(isNewSpree);
-      window.dispatchEvent(new CustomEvent('passage-pending-cleared', { detail: { id: passageId } }));
+      removePendingCapture(passageId);
       pushToast("Couldn't read that — try again");
       return;
     }
@@ -418,12 +419,13 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
     if (!saveResult.ok) {
       resolveSaved(null);
       rollbackOptimisticCapture(isNewSpree);
-      window.dispatchEvent(new CustomEvent('passage-pending-cleared', { detail: { id: passageId } }));
+      removePendingCapture(passageId);
       pushToast("Couldn't save that — try again");
       return;
     }
 
     resolveSaved(passage.id);
+    removePendingCapture(passage.id);
     window.dispatchEvent(new CustomEvent('passage-saved', { detail: { id: passage.id } }));
 
     maybeMergeWithPrevious(passage);
@@ -453,9 +455,9 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
     navigator.vibrate?.(10);
     // Optimistic here too — clears Library's placeholder card immediately
     // rather than waiting on the background delete below, which harmlessly
-    // no-ops if the real save already landed and got cleared by its own
-    // passage-saved dispatch by the time this fires.
-    window.dispatchEvent(new CustomEvent('passage-pending-cleared', { detail: { id: pending.id } }));
+    // no-ops (removePendingCapture) if the real save already landed and got
+    // cleared by its own success-path call by the time this fires.
+    removePendingCapture(pending.id);
     if (captureCount <= 1) {
       // Deferred a tick: calling this synchronously right here — a setState
       // in App, a different component than this click handler belongs to —
@@ -660,15 +662,11 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
     openAudioWindow(stackId, isNewSpree);
 
     // Generated here rather than inside performCapture so Library can be
-    // told about this exact passage before it exists — see the
-    // passage-pending dispatch below — and performCapture just uses this
-    // same id for the real row once extraction/save actually succeeds.
+    // told about this exact passage before it exists — see
+    // addPendingCapture below — and performCapture just uses this same id
+    // for the real row once extraction/save actually succeeds.
     const passageId = uuidv4();
-    window.dispatchEvent(
-      new CustomEvent('passage-pending', {
-        detail: { id: passageId, stackId, capturedAt: new Date().toISOString() },
-      })
-    );
+    addPendingCapture({ id: passageId, stackId, capturedAt: new Date().toISOString() });
 
     performCapture(path, stackId, passageId, isNewSpree);
   };
