@@ -1,2 +1,3 @@
 .DS_Store
 test-assets/
+.claude/settings.local.json
