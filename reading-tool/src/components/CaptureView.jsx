@@ -430,39 +430,39 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
   // Removes the most-recently-captured passage and decrements the "Captured
   // N" count. Deliberately targets recentCapturesRef.current[0] — the exact
   // in-memory record of the capture this bubble is for — rather than
-  // querying getPassages() for "whatever's newest in storage right now".
-  // The bubble opens optimistically before extraction/save even starts (see
-  // openAudioWindow), so a fast Undo tap can easily land before that save
-  // has landed in Supabase; querying live storage at that moment either
-  // finds nothing (first-ever capture: Undo silently no-ops, the passage
-  // saves moments later anyway) or — worse — deletes some unrelated,
-  // already-saved passage. Awaiting the tracked savedPromise instead always
-  // resolves to the right id, however early Undo is tapped.
+  // querying getPassages() for "whatever's newest in storage right now",
+  // which would be racy against the bubble's own optimistic-open timing (see
+  // openAudioWindow).
+  // Optimistic, like the rest of this app's gesture-driven UI: the count
+  // decrements (or the bubble starts its close/collapse) the instant Undo is
+  // tapped, not after the actual delete round-trips to Supabase — that part
+  // happens in the background, waiting on the tracked savedPromise first if
+  // the original save hasn't landed yet (nothing to delete until it has).
   // Dropping to zero ends the spree outright — nothing left to attach a
   // voice note to, so there's no reason to keep the window open. The
   // close-vs-decrement decision reads captureCount directly rather than
   // inside the setCaptureCount updater — updater functions must stay pure,
   // and closeAudioWindow has side effects (another setState, dispatching
   // window events).
-  const undoLastCapture = async () => {
+  const undoLastCapture = () => {
     const pending = recentCapturesRef.current[0];
     if (!pending) return;
-    const id = await pending.savedPromise;
     recentCapturesRef.current = recentCapturesRef.current.filter((c) => c !== pending);
-    if (!id) return; // extraction/save already failed and rolled back itself — nothing to undo
-    await deletePassage(id);
-    window.dispatchEvent(new CustomEvent('passage-saved', { detail: { id } }));
     navigator.vibrate?.(10);
     if (captureCount <= 1) {
-      // Deferred a tick: calling this synchronously right after the
-      // passage-saved dispatch above — both of which trigger setState in
-      // App, a different component than the one this click handler
-      // belongs to — was tripping React's cross-component
-      // update-during-render warning.
+      // Deferred a tick: calling this synchronously right here — a setState
+      // in App, a different component than this click handler belongs to —
+      // was tripping React's cross-component update-during-render warning.
       setTimeout(() => closeAudioWindow(false), 0);
     } else {
       setCaptureCount((c) => Math.max(0, c - 1));
     }
+    pending.savedPromise.then((id) => {
+      if (!id) return; // extraction/save already failed and rolled back itself — nothing to undo
+      deletePassage(id).then(() => {
+        window.dispatchEvent(new CustomEvent('passage-saved', { detail: { id } }));
+      });
+    });
   };
 
   // Record button: dictates a title while in title mode (amber), otherwise
