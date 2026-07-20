@@ -346,10 +346,10 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
 
   // Async and non-blocking: the UI is already back to ready by the time this
   // runs, and several can be in flight at once if the user gestures again.
-  // stackId/isNewSpree are decided by the caller (handleTouchEnd) at drag
-  // time, not here at resolution time — see the "Captured N" bubble's
-  // optimistic-open comment below for why.
-  const performCapture = async (path, stackId, isNewSpree) => {
+  // stackId/isNewSpree/passageId are decided by the caller (handleTouchEnd)
+  // at drag time, not here at resolution time — see the "Captured N"
+  // bubble's optimistic-open comment below for why.
+  const performCapture = async (path, stackId, passageId, isNewSpree) => {
     const rawBounds = rawBoundsOf(path);
     let cropBounds = computeSelectionBounds(path);
 
@@ -377,7 +377,7 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
     let resolveSaved;
     const savedPromise = new Promise((r) => (resolveSaved = r));
     recentCapturesRef.current = [
-      { rawBounds, cropBounds, cropDataUrl: dataUrl, savedPromise, tMs: now },
+      { id: passageId, rawBounds, cropBounds, cropDataUrl: dataUrl, savedPromise, tMs: now },
       ...recentCapturesRef.current,
     ].slice(0, MAX_RECENT_CAPTURES);
 
@@ -386,6 +386,7 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
     if (result.error) {
       resolveSaved(null);
       rollbackOptimisticCapture(isNewSpree);
+      window.dispatchEvent(new CustomEvent('passage-pending-cleared', { detail: { id: passageId } }));
       pushToast("Couldn't read that — try again");
       return;
     }
@@ -395,7 +396,7 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
     if (result.pageNumber) updatePageState(result.pageNumber);
 
     const passage = {
-      id: uuidv4(),
+      id: passageId,
       capturedAt: new Date().toISOString(),
       rawText: result.rawText,
       refinedText: result.refinedText,
@@ -417,6 +418,7 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
     if (!saveResult.ok) {
       resolveSaved(null);
       rollbackOptimisticCapture(isNewSpree);
+      window.dispatchEvent(new CustomEvent('passage-pending-cleared', { detail: { id: passageId } }));
       pushToast("Couldn't save that — try again");
       return;
     }
@@ -449,6 +451,11 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
     if (!pending) return;
     recentCapturesRef.current = recentCapturesRef.current.filter((c) => c !== pending);
     navigator.vibrate?.(10);
+    // Optimistic here too — clears Library's placeholder card immediately
+    // rather than waiting on the background delete below, which harmlessly
+    // no-ops if the real save already landed and got cleared by its own
+    // passage-saved dispatch by the time this fires.
+    window.dispatchEvent(new CustomEvent('passage-pending-cleared', { detail: { id: pending.id } }));
     if (captureCount <= 1) {
       // Deferred a tick: calling this synchronously right here — a setState
       // in App, a different component than this click handler belongs to —
@@ -652,7 +659,18 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
     const stackId = isNewSpree ? uuidv4() : spreeStackIdRef.current;
     openAudioWindow(stackId, isNewSpree);
 
-    performCapture(path, stackId, isNewSpree);
+    // Generated here rather than inside performCapture so Library can be
+    // told about this exact passage before it exists — see the
+    // passage-pending dispatch below — and performCapture just uses this
+    // same id for the real row once extraction/save actually succeeds.
+    const passageId = uuidv4();
+    window.dispatchEvent(
+      new CustomEvent('passage-pending', {
+        detail: { id: passageId, stackId, capturedAt: new Date().toISOString() },
+      })
+    );
+
+    performCapture(path, stackId, passageId, isNewSpree);
   };
 
   const cw = containerRef.current?.clientWidth ?? 0;

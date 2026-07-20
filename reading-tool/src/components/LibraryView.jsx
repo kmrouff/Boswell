@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { getPassages, savePassage, deletePassage, updatePassage } from '../lib/storage.js';
 import PassageCard, { HeartIcon } from './PassageCard.jsx';
 import StackedCard from './StackedCard.jsx';
+import PendingPassageCard from './PendingPassageCard.jsx';
 import SettingsDrawer from './SettingsDrawer.jsx';
 
 const MISC = 'Miscellaneous';
@@ -56,6 +57,12 @@ export default function LibraryView({ onRequestTitle, flashRequest }) {
   const [deleted, setDeleted] = useState(null); // the removed passage, or null
   const [flashId, setFlashId] = useState(null);
   const [stackPickerFor, setStackPickerFor] = useState(null); // passage id or null
+  // Placeholder cards for captures still being read/saved — shown the
+  // instant a drag is recognized (see CaptureView's 'passage-pending'
+  // dispatch), well before the real passage exists, so Library never looks
+  // like a capture "didn't work" during the few-second extraction round
+  // trip. { id, stackId, capturedAt }[].
+  const [pending, setPending] = useState([]);
   const deleteTimerRef = useRef(null);
   const flashTimerRef = useRef(null);
 
@@ -63,9 +70,25 @@ export default function LibraryView({ onRequestTitle, flashRequest }) {
 
   useEffect(() => {
     refresh().finally(() => setLoading(false));
-    const onPassageSaved = () => refresh();
+    // A pending capture resolves one of two ways: passage-saved (the real
+    // passage now exists — same id as the placeholder, since CaptureView
+    // generates it upfront) or passage-pending-cleared (it failed, or the
+    // user hit Undo before it landed) — either way the placeholder comes out.
+    const onPassageSaved = (e) => {
+      if (e.detail?.id) setPending((prev) => prev.filter((p) => p.id !== e.detail.id));
+      refresh();
+    };
+    const onPassagePending = (e) => setPending((prev) => [e.detail, ...prev]);
+    const onPassagePendingCleared = (e) =>
+      setPending((prev) => prev.filter((p) => p.id !== e.detail.id));
     window.addEventListener('passage-saved', onPassageSaved);
-    return () => window.removeEventListener('passage-saved', onPassageSaved);
+    window.addEventListener('passage-pending', onPassagePending);
+    window.addEventListener('passage-pending-cleared', onPassagePendingCleared);
+    return () => {
+      window.removeEventListener('passage-saved', onPassageSaved);
+      window.removeEventListener('passage-pending', onPassagePending);
+      window.removeEventListener('passage-pending-cleared', onPassagePendingCleared);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -331,7 +354,7 @@ export default function LibraryView({ onRequestTitle, flashRequest }) {
         className="min-h-0 flex-1 overflow-y-auto px-[18px] pb-6 select-none [-webkit-touch-callout:none]"
         style={{ touchAction: 'pan-y' }}
       >
-        {passages.length === 0 && (
+        {passages.length === 0 && pending.length === 0 && (
           <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
             <p className="text-lg text-parchment/70">No passages yet</p>
             <p className="text-sm text-parchment/40">
@@ -339,6 +362,19 @@ export default function LibraryView({ onRequestTitle, flashRequest }) {
             </p>
           </div>
         )}
+
+        {/* Only in the plain unfiltered Recent view — a placeholder has no
+            real text yet, so it has nothing to offer a search/favorites
+            filter or a by-title group. It'll have resolved into a real,
+            filterable/groupable passage within a few seconds regardless. */}
+        {!grouped &&
+          !q &&
+          !favOnly &&
+          pending.map((p) => (
+            <div key={p.id} className="mt-3">
+              <PendingPassageCard />
+            </div>
+          ))}
 
         {passages.length > 0 && !grouped && buildRenderItems(filtered).map(renderPassageOrStack)}
 
