@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { THEMES, THEME_NAMES, getStoredTheme, setStoredTheme, applyThemeVars, resolveTheme, getStoredAccent, getStoredRadius } from '../lib/theme.js';
 import { supabase } from '../lib/supabaseClient.js';
+import { resetWelcomeSeen } from './WelcomeScreen.jsx';
 
 const CONTACT_EMAIL = 'kevinrouff@gmail.com';
 
@@ -52,7 +53,13 @@ export default function SettingsDrawer({ open, onClose }) {
     applyThemeVars(resolveTheme(name, getStoredAccent(), getStoredRadius()));
   };
 
-  const logOut = () => supabase.auth.signOut();
+  // TEMP, testing-only: also resets the welcome screen so it re-triggers on
+  // the next sign-in instead of only ever showing once per browser — makes
+  // it easy to re-check during onboarding iteration. Revert once settled.
+  const logOut = () => {
+    resetWelcomeSeen();
+    supabase.auth.signOut();
+  };
 
   const openFeedback = () => {
     onClose();

@@ -90,6 +90,11 @@ function App() {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
     const { data: subscription } = supabase.auth.onAuthStateChange((_event, newSession) => {
       setSession(newSession);
+      // TEMP, testing-only: `welcomed`'s useState initializer only ever runs
+      // once on mount, so SettingsDrawer's resetWelcomeSeen() clearing
+      // localStorage wouldn't otherwise be reflected here without a full
+      // reload. Revert alongside resetWelcomeSeen once onboarding is settled.
+      if (_event === 'SIGNED_OUT') setWelcomed(hasSeenWelcome());
     });
     return () => subscription.subscription.unsubscribe();
   }, []);

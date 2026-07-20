@@ -3,6 +3,11 @@ import { useState } from 'react';
 const WELCOMED_KEY = 'boswell_welcomed';
 
 export const hasSeenWelcome = () => localStorage.getItem(WELCOMED_KEY) === 'true';
+// TEMP, testing-only: lets logging out re-trigger the welcome screen so it's
+// easy to re-check during onboarding iteration, instead of only ever once
+// per browser. Called from SettingsDrawer's logOut — remove both once
+// onboarding is settled.
+export const resetWelcomeSeen = () => localStorage.removeItem(WELCOMED_KEY);
 export const markWelcomeSeen = () => localStorage.setItem(WELCOMED_KEY, 'true');
 
 const GESTURES = [
