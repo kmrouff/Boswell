@@ -46,11 +46,12 @@ const HINT_DISMISSED_KEY = 'capture_hint_dismissed';
 // is easy to forget; this appears at the moment it is actually usable.
 const VOICE_HINT_SEEN_KEY = 'voice_hint_seen';
 
-// Deliberately longer than AUDIO_WINDOW_MS, and on its own timer rather than
-// tied to the window: it is a sentence to read, and the window closing out
-// from under it mid-sentence was too quick on first exposure.
-const VOICE_HINT_MS = 4250;
-const VOICE_HINT_FADE_MS = 300;
+// The very first capture holds the whole window open this much longer, so a
+// first-time user has time to read the hint before anything moves. Applies to
+// the window itself, not just the hint: the record button, the "Captured N"
+// bubble and the hint are one moment, and staggering their exits made the
+// hint look like it was disappearing on its own afterwards. Every capture
+// after that uses the normal AUDIO_WINDOW_MS and shows no hint.
 
 // Lightweight heuristic for a dictated title like "Solaris by Stanisław Lem" —
 // not a real NLP split, just a common-case convenience for spoken titles.
@@ -75,6 +76,7 @@ const MAX_RECENT_CAPTURES = 4;
 // done (no audio). A recording that's actually in progress isn't subject to
 // this — it only gates *starting* one.
 const AUDIO_WINDOW_MS = 3250;
+const FIRST_RUN_WINDOW_MS = 4250;
 
 // Once a voice note actually attaches, the window gets a short fresh tail
 // instead of closing immediately — long enough to see the confirmation, short
@@ -246,7 +248,7 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
     voiceHintTimerRef.current = setTimeout(() => {
       setVoiceHintVisible(false);
       setVoiceHintFading(false);
-    }, VOICE_HINT_FADE_MS);
+    }, BUBBLE_COLLAPSE_MS);
   };
 
   // Opens (or extends) the record button's active window and the "Captured
@@ -264,27 +266,25 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
     setAudioWindowOpen(true);
     setBubbleClosing(false);
     setAudioAttached(false); // a fresh capture never already has audio on it
-    if (localStorage.getItem(VOICE_HINT_SEEN_KEY) !== 'true') {
+    const firstRun = localStorage.getItem(VOICE_HINT_SEEN_KEY) !== 'true';
+    if (firstRun) {
       localStorage.setItem(VOICE_HINT_SEEN_KEY, 'true');
+      clearTimeout(voiceHintTimerRef.current);
       setVoiceHintVisible(true);
       setVoiceHintFading(false);
-      clearTimeout(voiceHintTimerRef.current);
-      voiceHintTimerRef.current = setTimeout(() => {
-        setVoiceHintFading(true);
-        voiceHintTimerRef.current = setTimeout(() => {
-          setVoiceHintVisible(false);
-          setVoiceHintFading(false);
-        }, VOICE_HINT_FADE_MS);
-      }, VOICE_HINT_MS);
     }
     spreeActiveRef.current = true;
     spreeStackIdRef.current = stackId;
     setCaptureCount((c) => (isNewSpree ? 1 : c + 1));
     if (isRecordingRef.current) return;
+    // Stay open longer while the hint is up — including for a second capture
+    // landing during that same first window, which would otherwise cut the
+    // hint short by restarting the countdown at the normal length.
+    const lingering = firstRun || voiceHintVisible;
     audioWindowTimerRef.current = setTimeout(() => {
       audioWindowTimerRef.current = null;
       closeAudioWindow(true);
-    }, AUDIO_WINDOW_MS);
+    }, lingering ? FIRST_RUN_WINDOW_MS : AUDIO_WINDOW_MS);
   };
 
   // `committed` distinguishes "the spree finished naturally (timeout or a
@@ -297,12 +297,16 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
     clearTimeout(audioWindowTimerRef.current);
     spreeActiveRef.current = false;
     setBubbleClosing(true);
+    setVoiceHintFading(true); // exits on the same beat as the bubble
+    clearTimeout(voiceHintTimerRef.current);
     clearTimeout(bubbleCloseTimerRef.current);
     bubbleCloseTimerRef.current = setTimeout(() => {
       bubbleCloseTimerRef.current = null;
       setAudioWindowOpen(false);
       setBubbleClosing(false);
       setAudioAttached(false);
+      setVoiceHintVisible(false);
+      setVoiceHintFading(false);
       if (committed) window.dispatchEvent(new CustomEvent('capture-spree-saved'));
     }, BUBBLE_COLLAPSE_MS);
   };
@@ -892,7 +896,7 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
           style={{
             backdropFilter: 'blur(2px)',
             opacity: voiceHintFading ? 0 : 1,
-            transition: `opacity ${VOICE_HINT_FADE_MS}ms ease-out`,
+            transition: `opacity ${BUBBLE_COLLAPSE_MS}ms ease-out`,
           }}
         >
           You can append your thoughts to that captured text with a recording
