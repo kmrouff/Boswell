@@ -385,7 +385,11 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
 
     const result = await extractPassage(dataUrl);
 
-    if (result.error) {
+    // refined_text is the one NOT NULL column on the table, so an extraction
+    // that came back without it would produce an insert that can only ever
+    // fail. Treat it as a read failure here rather than letting it reach the
+    // database and surface as a confusing save error.
+    if (result.error || !result.refinedText) {
       resolveSaved(null);
       rollbackOptimisticCapture(isNewSpree);
       removePendingCapture(passageId);
@@ -427,7 +431,7 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
       pushToast(
         isAuthFailure(saveResult.error)
           ? 'Session expired — open Settings and sign in again'
-          : "Couldn't save that — try again"
+          : `Couldn't save: ${(saveResult.error?.message || 'unknown error').slice(0, 90)}`
       );
       return;
     }
