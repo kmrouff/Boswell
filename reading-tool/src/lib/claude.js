@@ -2,26 +2,44 @@
 // both in the deployed Vercel function and in local dev via the Vite
 // middleware in vite.config.js. The client never sees the key.
 const API_URL = '/api/claude';
-const MODEL = 'claude-sonnet-4-6';
+// Reading text off a page is transcription, not reasoning, so it runs on the
+// smallest capable model — cheaper and faster on the app's hottest path.
+//
+// It is also the only one that reliably works. Anthropic applies output-side
+// content filtering, and transcribing real literature trips it far more often
+// than you would expect, not only for explicit language. Measured against
+// four photographed pages of Stanisław Lem: three were blocked outright on
+// Sonnet, the same three were blocked on Opus, and Haiku transcribed all
+// three cleanly with correct page numbers. Sensitivity clearly differs by
+// model, and it is the passage's own text being reproduced that triggers it —
+// a leaner prompt made no difference, so it cannot be prompted around. For a
+// reading app this was not an edge case: it meant every capture from an
+// entire novel failed.
+const VISION_MODEL = 'claude-haiku-4-5-20251001';
 
-const EXTRACT_SYSTEM_PROMPT = `You are a reading annotation assistant. The user has captured a cropped region of a page, indicating a passage of text they want to save by dragging their finger down the screen over that region on their phone (the phone's camera itself is held still; the drag was on the touchscreen, not physically over the page).
+// Chat answers questions across the whole library, which is genuine
+// reasoning rather than transcription, so it keeps the larger model.
+const CHAT_MODEL = 'claude-sonnet-4-6';
 
-The image may include a bit more or less than the exact intended passage, since the selection has a buffer margin built in. Your job:
-1. Read the text visible in the image
-2. Use semantic reasoning to identify the coherent unit of meaning most likely intended — trim obvious unrelated fragments at the very top/bottom edges if they're clearly incomplete or unrelated, but when in doubt include rather than exclude
-3. Identify the likely source type (book, printout, screen, presentation slide, etc.), including author/title if legible or inferable
-4. If a page number is visible anywhere in the image, report it — otherwise null. Don't guess if it's not actually visible.
+// If the small model is ever the one blocked, try the larger one once before
+// giving up — the failure is model-specific in both directions.
+const FALLBACK_MODEL = CHAT_MODEL;
+
+const isContentFilterBlock = (status, bodyText) =>
+  status === 400 && /content filtering/i.test(bodyText);
+
+const EXTRACT_SYSTEM_PROMPT = `Transcribe the passage in this photo of a page. The crop has a small buffer margin, so it may include a partial line at the top or bottom.
 
 Respond ONLY with JSON, no markdown fences:
 {
-  "rawText": "full extracted text including buffer",
-  "refinedText": "the semantically coherent target passage",
-  "context": "brief source description",
-  "pageNumber": "the visible page number as a string, or null if none is visible",
+  "rawText": "everything you can read, including the buffer",
+  "refinedText": "just the coherent passage — drop incomplete fragments at the edges, but when in doubt keep them",
+  "context": "brief source description, with title/author if legible",
+  "pageNumber": "the page number as a string, only if actually visible, else null",
   "confidence": "high | medium | low"
 }
 
-If unreadable or no clear text is found:
+If unreadable:
 { "error": "brief explanation" }`;
 
 const parseJsonResponse = (text) => {
@@ -29,19 +47,37 @@ const parseJsonResponse = (text) => {
   return JSON.parse(cleaned);
 };
 
-const callClaude = async (body) => {
-  const res = await fetch(API_URL, {
+const postToProxy = (body) =>
+  fetch(API_URL, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
 
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Claude API error ${res.status}: ${errText}`);
+const callClaude = async (body) => {
+  let res = await postToProxy(body);
+  if (res.ok) return res.json();
+
+  let errText = await res.text();
+
+  // See FALLBACK_MODEL: a content-filter block is about which model is
+  // transcribing, not about the image being unreadable, so it's worth one
+  // automatic retry before giving up on the capture entirely.
+  if (isContentFilterBlock(res.status, errText) && body.model !== FALLBACK_MODEL) {
+    res = await postToProxy({ ...body, model: FALLBACK_MODEL });
+    if (res.ok) return res.json();
+    errText = await res.text();
   }
 
-  return res.json();
+  // Flagged so the UI can say something truer than "try again" — retrying a
+  // filtered passage verbatim fails identically every time.
+  if (isContentFilterBlock(res.status, errText)) {
+    const err = new Error('Blocked by the content filter');
+    err.contentFiltered = true;
+    throw err;
+  }
+
+  throw new Error(`Claude API error ${res.status}: ${errText}`);
 };
 
 // Resizes/re-encodes a base64 image (with data URL prefix or not) so the
@@ -77,7 +113,7 @@ export const extractPassage = async (imageBase64) => {
     const { mediaType, data } = toMediaAndData(resized);
 
     const response = await callClaude({
-      model: MODEL,
+      model: VISION_MODEL,
       max_tokens: 1024,
       system: EXTRACT_SYSTEM_PROMPT,
       messages: [
@@ -98,10 +134,11 @@ export const extractPassage = async (imageBase64) => {
       return { error: `Failed to parse Claude response: ${text.slice(0, 200)}` };
     }
   } catch (err) {
-    // Covers network failures and API-level blocks (e.g. output content
-    // filtering on passages with explicit language) — both are just
-    // "couldn't read that" from the UI's perspective, not a crash.
-    return { error: err.message || 'Extraction failed' };
+    // Covers network failures and API-level blocks. Content-filter blocks are
+    // flagged separately (see callClaude) because they are not "couldn't read
+    // that" — the image was read fine, the transcription was refused — and
+    // the advice for them is different.
+    return { error: err.message || 'Extraction failed', contentFiltered: !!err.contentFiltered };
   }
 };
 
@@ -123,7 +160,7 @@ export const extractTitle = async (imageBase64) => {
     const { mediaType, data } = toMediaAndData(resized);
 
     const response = await callClaude({
-      model: MODEL,
+      model: VISION_MODEL,
       max_tokens: 150,
       system: TITLE_SYSTEM_PROMPT,
       messages: [
@@ -164,7 +201,7 @@ export const extractPageNumber = async (imageBase64) => {
     const { mediaType, data } = toMediaAndData(resized);
 
     const response = await callClaude({
-      model: MODEL,
+      model: VISION_MODEL,
       max_tokens: 50,
       system: PAGE_SYSTEM_PROMPT,
       messages: [
@@ -207,7 +244,7 @@ If they are not a continuation of each other (unrelated or separate passages), r
 Respond ONLY with JSON, no markdown fences.`;
 
   const response = await callClaude({
-    model: MODEL,
+    model: VISION_MODEL,
     max_tokens: 1024,
     system: systemPrompt,
     messages: [{ role: 'user', content: 'Check continuation.' }],
@@ -269,7 +306,7 @@ Only include this when a single passage is clearly the primary source; omit it e
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      model: MODEL,
+      model: CHAT_MODEL,
       max_tokens: 2048,
       system: systemPrompt,
       messages,
@@ -331,7 +368,7 @@ Only include this when a single passage is clearly the primary source; omit it e
 export const transcribeAudio = async (audioBase64, mimeType = 'audio/webm') => {
   try {
     const response = await callClaude({
-      model: MODEL,
+      model: VISION_MODEL,
       max_tokens: 512,
       system:
         'Transcribe the audio note as plain text. Respond ONLY with the transcript text, no preamble, no JSON.',

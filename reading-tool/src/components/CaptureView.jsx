@@ -393,7 +393,11 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
       resolveSaved(null);
       rollbackOptimisticCapture(isNewSpree);
       removePendingCapture(passageId);
-      pushToast("Couldn't read that — try again");
+      pushToast(
+        result.contentFiltered
+          ? "This passage couldn't be transcribed — try selecting a bit less of it"
+          : "Couldn't read that — try again"
+      );
       return;
     }
 
