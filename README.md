@@ -1,8 +1,14 @@
 # Boswell
 
-<img src="docs/hero.png" width="720">
-
 Boswell is a mobile web app for saving passages out of physical books: point your camera at a page and drag a finger down the text you want to keep.
+
+<img src="docs/capture-passage.png" width="300">
+
+<p>
+  <img src="docs/library-recent.png" width="300">
+  <img src="docs/library-by-title.png" width="300">
+  <img src="docs/chat-answer.png" width="300">
+</p>
 
 ## Why I built it
 
