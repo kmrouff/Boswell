@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import MarginTicks from './MarginTicks.jsx';
+import SelectionDim from './SelectionDim.jsx';
 import CaptureFlash from './CaptureFlash.jsx';
 import TitleLoggedFlash from './TitleLoggedFlash.jsx';
 import TitleModeOverlay from './TitleModeOverlay.jsx';
@@ -750,8 +751,12 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
       >
+        {/* Dim first, ticks second: the ticks must sit on top of the mask. */}
         {containerRef.current && dragBounds && (
-          <MarginTicks yMin={dragBounds.min} yMax={dragBounds.max} containerHeight={ch} />
+          <>
+            <SelectionDim yMin={dragBounds.min} yMax={dragBounds.max} containerHeight={ch} />
+            <MarginTicks yMin={dragBounds.min} yMax={dragBounds.max} containerHeight={ch} />
+          </>
         )}
 
         {containerRef.current && captureBounds && (
