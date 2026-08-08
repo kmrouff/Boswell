@@ -38,6 +38,7 @@ import {
 import { maybeMergeWithPrevious } from '../lib/continuation.js';
 import { isDictationSupported, startDictation } from '../lib/dictation.js';
 import { addPendingCapture, removePendingCapture } from '../lib/pendingCaptures.js';
+import { canonicalizeTitle } from '../lib/titles.js';
 
 const HINT_DISMISSED_KEY = 'capture_hint_dismissed';
 
@@ -350,14 +351,30 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
   // captures) or a specific existing passage (from the Library "add title"
   // flow) — then exits.
   const applyTitle = async (title, author = null) => {
+    // Reuse the spelling already on file when this is a book we have seen
+    // before, so one book stays one group in the Library — see lib/titles.js.
+    // Also inherits that book's author when this capture did not read one,
+    // which is common when the title came off a spine or a running header.
+    let finalTitle = title;
+    let finalAuthor = author;
+    try {
+      const saved = await getPassages();
+      finalTitle = canonicalizeTitle(title, saved.map((p) => p.sourceTitle).filter(Boolean));
+      if (!finalAuthor) {
+        finalAuthor = saved.find((p) => p.sourceTitle === finalTitle && p.sourceAuthor)?.sourceAuthor ?? null;
+      }
+    } catch {
+      // Reconciling is a nicety; never block setting a title on it.
+    }
+
     if (titleMode?.target === 'passage') {
-      await updatePassage(titleMode.passageId, { sourceTitle: title, sourceAuthor: author });
+      await updatePassage(titleMode.passageId, { sourceTitle: finalTitle, sourceAuthor: finalAuthor });
       window.dispatchEvent(new CustomEvent('passage-saved', { detail: { id: titleMode.passageId } }));
     } else {
-      setCurrentSourceTitle(title);
-      setCurrentSourceAuthor(author);
-      setCurrentTitle(title);
-      setCurrentAuthor(author);
+      setCurrentSourceTitle(finalTitle);
+      setCurrentSourceAuthor(finalAuthor);
+      setCurrentTitle(finalTitle);
+      setCurrentAuthor(finalAuthor);
     }
     clearTimeout(titleTapTimerRef.current);
     tapHistoryRef.current = [];
