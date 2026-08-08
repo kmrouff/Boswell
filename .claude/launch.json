@@ -2,14 +2,14 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "reading-tool-dev",
+      "name": "boswell-dev",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--", "--host"],
       "cwd": "reading-tool",
       "port": 5173
     },
     {
-      "name": "reading-tool-preview",
+      "name": "boswell-preview",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev:preview", "--", "--port", "5174"],
       "cwd": "reading-tool",
