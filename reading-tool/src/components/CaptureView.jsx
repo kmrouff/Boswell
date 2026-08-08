@@ -26,6 +26,7 @@ import {
   getPassage,
   getPassages,
   updatePassage,
+  isAuthFailure,
   getCurrentSourceTitle,
   setCurrentSourceTitle,
   getCurrentSourceAuthor,
@@ -420,7 +421,14 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
       resolveSaved(null);
       rollbackOptimisticCapture(isNewSpree);
       removePendingCapture(passageId);
-      pushToast("Couldn't save that — try again");
+      // A rejected write is nearly always a dead session rather than a
+      // transient glitch, and "try again" is actively wrong advice for it —
+      // retrying fails identically forever. Say what actually happened.
+      pushToast(
+        isAuthFailure(saveResult.error)
+          ? 'Session expired — open Settings and sign in again'
+          : "Couldn't save that — try again"
+      );
       return;
     }
 

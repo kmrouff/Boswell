@@ -49,6 +49,14 @@ const toRow = (passage, userId) => ({
   stack_id: passage.stackId,
 });
 
+// A write rejected because Row Level Security saw an anonymous caller (code
+// 42501), or because the token itself was refused. Both mean "the session
+// this device is holding is not actually valid any more", which is worth
+// telling the user plainly — it is fixed by signing in again, not by
+// retrying, and it must never be reported as a generic save failure.
+export const isAuthFailure = (error) =>
+  !!error && (error.code === '42501' || error.code === 'PGRST301' || /jwt|token/i.test(error.message || ''));
+
 // Reads the locally-cached session (no network round trip — Supabase's own
 // per-request auth header/RLS check is what actually enforces access, this
 // is just for building request payloads that need a user id).

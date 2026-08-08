@@ -91,7 +91,32 @@ function App() {
 
   useEffect(() => {
     if (!isSupabaseConfigured) return;
-    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    // getSession() only reads the token cached in localStorage — it will
+    // happily hand back a session whose token the server no longer accepts
+    // (expired, revoked, or invalidated while the project was paused). That
+    // failure mode is genuinely dangerous here rather than merely annoying:
+    // every request still *succeeds*, but Row Level Security sees an
+    // anonymous caller, so reads come back as an empty list with no error at
+    // all and writes are silently rejected. The app looks signed in while
+    // presenting an empty Library and refusing to save — indistinguishable,
+    // to the user, from their data having been lost.
+    // getUser() actually asks the server, so it's the only way to tell a
+    // real session from a dead one. A dead one is cleared, dropping the user
+    // to a clean sign-in rather than a broken session that lies.
+    supabase.auth.getSession().then(async ({ data }) => {
+      const cached = data.session;
+      if (!cached) {
+        setSession(null);
+        return;
+      }
+      const { error } = await supabase.auth.getUser();
+      if (error) {
+        await supabase.auth.signOut();
+        setSession(null);
+        return;
+      }
+      setSession(cached);
+    });
     const { data: subscription } = supabase.auth.onAuthStateChange((_event, newSession) => {
       setSession(newSession);
     });
