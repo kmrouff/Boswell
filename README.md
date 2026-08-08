@@ -6,7 +6,7 @@ Boswell is a mobile web app for saving passages out of physical books: point you
 
 ## Why I built it
 
-I mark up books constantly, underlining and folding corners, then never go back to any of it. Typing a passage out is slow enough that I skip it and lose the line. This makes keeping one cost about as much effort as underlining it.
+I mark up books constantly, underlining and folding corners, then never go back to any of it. Typing a passage out is slow enough that I skip it and lose the line. This makes keeping one cost about as much effort as underlining it. Named after James Boswell, who spent his life writing down what someone else said.
 
 ## How it works
 

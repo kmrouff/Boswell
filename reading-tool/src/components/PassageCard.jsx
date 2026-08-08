@@ -384,7 +384,7 @@ export default function PassageCard({
               className="rounded-full border px-3.5 py-2 font-sans text-[12.5px]"
               style={{ borderColor: 'rgb(var(--fg) / .2)', color: 'rgb(var(--fg) / .8)' }}
             >
-              Add title
+              {passage.sourceTitle ? 'Edit title' : 'Add title'}
             </button>
             <button
               type="button"
@@ -395,7 +395,7 @@ export default function PassageCard({
               className="rounded-full border px-3.5 py-2 font-sans text-[12.5px]"
               style={{ borderColor: 'rgb(var(--fg) / .2)', color: 'rgb(var(--fg) / .8)' }}
             >
-              Add page
+              {passage.pageNumber ? 'Edit page' : 'Add page'}
             </button>
             <button
               type="button"
