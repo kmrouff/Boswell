@@ -1,0 +1,6 @@
+# The design handoff bundle is a self-contained HTML mockup kept as a
+# reference for how the UI pass was specified. It is not part of the app and
+# is not code I wrote, but at 46KB against a 2KB real index.html it dominated
+# the repository language stats and reported the project as a fifth HTML.
+*.dc.html linguist-documentation
+design_handoff_library_ui_pass/** linguist-documentation
