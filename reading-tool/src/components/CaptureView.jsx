@@ -40,6 +40,11 @@ import { addPendingCapture, removePendingCapture } from '../lib/pendingCaptures.
 
 const HINT_DISMISSED_KEY = 'capture_hint_dismissed';
 
+// Shown once, the first time a capture opens the voice window. The welcome
+// screen also lists this gesture, but a line read before ever using the app
+// is easy to forget; this appears at the moment it is actually usable.
+const VOICE_HINT_SEEN_KEY = 'voice_hint_seen';
+
 // Lightweight heuristic for a dictated title like "Solaris by Stanisław Lem" —
 // not a real NLP split, just a common-case convenience for spoken titles.
 const splitDictatedTitle = (text) => {
@@ -123,6 +128,8 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
   // yet — shows a light colored outline on the bubble as a hint, and is
   // cleared the moment a fresh (unrelated) capture lands.
   const [audioAttached, setAudioAttached] = useState(false);
+  // First-use coach bubble above the record button — see VOICE_HINT_SEEN_KEY.
+  const [voiceHintVisible, setVoiceHintVisible] = useState(false);
   // How many captures have landed in the current spree — shown in the
   // "Captured N" bubble, which is visible for exactly as long as
   // audioWindowOpen is (they're the same window, just two facets of it).
@@ -235,6 +242,10 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
     setAudioWindowOpen(true);
     setBubbleClosing(false);
     setAudioAttached(false); // a fresh capture never already has audio on it
+    if (localStorage.getItem(VOICE_HINT_SEEN_KEY) !== 'true') {
+      localStorage.setItem(VOICE_HINT_SEEN_KEY, 'true');
+      setVoiceHintVisible(true);
+    }
     spreeActiveRef.current = true;
     spreeStackIdRef.current = stackId;
     setCaptureCount((c) => (isNewSpree ? 1 : c + 1));
@@ -261,6 +272,7 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
       setAudioWindowOpen(false);
       setBubbleClosing(false);
       setAudioAttached(false);
+      setVoiceHintVisible(false);
       if (committed) window.dispatchEvent(new CustomEvent('capture-spree-saved'));
     }, BUBBLE_COLLAPSE_MS);
   };
@@ -833,6 +845,19 @@ export default function CaptureView({ titleRequest, onTitleRequestHandled }) {
       {/* Page indicator (bottom) — hidden in title mode. */}
       {!cameraError && !titleMode && (
         <PageIndicator page={currentPage} onChange={updatePageState} />
+      )}
+
+      {/* First-use coach bubble, sat directly above the record button while
+          the voice window is open. Right-aligned to the button rather than
+          centred, so it reads as pointing at it. Hidden once recording
+          starts, when it has served its purpose. */}
+      {!cameraError && !titleMode && audioWindowOpen && voiceHintVisible && !isRecording && (
+        <div
+          className="pointer-events-none absolute right-5 bottom-[96px] z-20 max-w-[196px] rounded-2xl bg-black/75 px-3.5 py-2.5 text-right font-sans text-[12.5px] leading-snug text-parchment"
+          style={{ backdropFilter: 'blur(2px)' }}
+        >
+          You can append your thoughts to that captured text with a recording
+        </div>
       )}
 
       {!cameraError && (

@@ -407,7 +407,7 @@ export default function PassageCard({
                   : { borderColor: 'rgb(var(--fg) / .2)', color: 'rgb(var(--fg) / .8)' }
               }
             >
-              {recording ? 'Stop' : 'Add voice note'}
+              {recording ? 'Stop' : passage.audioTranscript ? 'Replace voice note' : 'Add voice note'}
             </button>
             {onRequestStack && passage.sourceTitle && (
               <button
