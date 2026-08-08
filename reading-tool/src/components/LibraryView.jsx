@@ -71,7 +71,22 @@ export default function LibraryView({ onRequestTitle, flashRequest }) {
   const deleteTimerRef = useRef(null);
   const flashTimerRef = useRef(null);
 
-  const refresh = async () => setPassages(await getPassages());
+  // Sequenced, not just `setPassages(await getPassages())`: several refreshes
+  // can easily be in flight at once (the mount fetch, then a 'passage-saved'
+  // from a capture that finishes saving a moment later), and there is no
+  // guarantee the responses come back in the order they were issued. Without
+  // this guard a slower *earlier* request can resolve last and overwrite the
+  // newer result — dropping the just-saved passage back out of the list right
+  // after its placeholder card was removed, which looks exactly like the
+  // capture failed. Only the newest issued request is allowed to commit.
+  const refreshSeqRef = useRef(0);
+
+  const refresh = async () => {
+    const seq = ++refreshSeqRef.current;
+    const next = await getPassages();
+    if (seq !== refreshSeqRef.current) return; // superseded by a later refresh
+    setPassages(next);
+  };
 
   useEffect(() => {
     refresh().finally(() => setLoading(false));
