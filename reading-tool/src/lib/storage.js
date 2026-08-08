@@ -57,11 +57,21 @@ const getUserId = async () => {
   return data.session?.user?.id ?? null;
 };
 
-export const getPassages = async () => {
+// Reports failures instead of hiding them. getPassages below swallows the
+// error and returns [] — which is indistinguishable, to a caller and so to
+// the user, from "this account genuinely has no passages". An expired token,
+// a dropped connection or an RLS problem therefore rendered as a confident
+// empty Library, which is the worst possible way to fail: it reads as data
+// loss. Anything user-facing should use this and say so out loud.
+export const getPassagesResult = async () => {
   const { data, error } = await supabase.from('passages').select('*').order('captured_at', { ascending: false });
-  if (error) return [];
-  return data.map(fromRow);
+  if (error) return { passages: [], error };
+  return { passages: data.map(fromRow), error: null };
 };
+
+// Convenience wrapper for the internal, non-user-facing callers that have
+// nothing useful to do with an error anyway.
+export const getPassages = async () => (await getPassagesResult()).passages;
 
 export const savePassage = async (passage) => {
   const userId = await getUserId();
@@ -98,10 +108,18 @@ export const updatePassage = async (id, updates) => {
 export const replacePassages = async (idsToRemove, newPassage) => {
   const userId = await getUserId();
   if (!userId) return { ok: false, error: new Error('Not signed in') };
-  const { error: delError } = await supabase.from('passages').delete().in('id', idsToRemove);
-  if (delError) return { ok: false, error: delError };
+  // Insert BEFORE delete, deliberately. Still two round trips rather than a
+  // real transaction, so a failure between them leaves things inconsistent
+  // either way — but the order decides *which* inconsistency. Deleting first
+  // means a failed insert destroys both originals with nothing to show for
+  // it: silent, permanent data loss. Inserting first means a failed delete
+  // leaves a visible duplicate instead, which is recoverable and obvious.
+  // The merged row carries a fresh uuid, so it can never collide with the
+  // rows it is replacing.
   const { error: insError } = await supabase.from('passages').insert(toRow(newPassage, userId));
-  return { ok: !insError, error: insError };
+  if (insError) return { ok: false, error: insError };
+  const { error: delError } = await supabase.from('passages').delete().in('id', idsToRemove);
+  return { ok: !delError, error: delError };
 };
 
 export const clearAllPassages = async () => {

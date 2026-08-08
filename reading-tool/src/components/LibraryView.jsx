@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { getPassages, savePassage, deletePassage, updatePassage } from '../lib/storage.js';
+import { getPassages, getPassagesResult, savePassage, deletePassage, updatePassage } from '../lib/storage.js';
 import { getPendingCaptures } from '../lib/pendingCaptures.js';
 import PassageCard, { HeartIcon } from './PassageCard.jsx';
 import StackedCard from './StackedCard.jsx';
@@ -58,6 +58,7 @@ export default function LibraryView({ onRequestTitle, flashRequest }) {
   const [deleted, setDeleted] = useState(null); // the removed passage, or null
   const [flashId, setFlashId] = useState(null);
   const [stackPickerFor, setStackPickerFor] = useState(null); // passage id or null
+  const [loadError, setLoadError] = useState(null); // a failed load, kept distinct from an empty library
   // Placeholder cards for captures still being read/saved, so Library never
   // looks like a capture "didn't work" during the few-second extraction
   // round trip. Backed by lib/pendingCaptures.js, not a plain window event —
@@ -83,9 +84,12 @@ export default function LibraryView({ onRequestTitle, flashRequest }) {
 
   const refresh = async () => {
     const seq = ++refreshSeqRef.current;
-    const next = await getPassages();
+    const { passages: next, error } = await getPassagesResult();
     if (seq !== refreshSeqRef.current) return; // superseded by a later refresh
-    setPassages(next);
+    // Kept separate from `passages` so a failed load can never be rendered
+    // as "you have nothing saved" — see getPassagesResult.
+    setLoadError(error);
+    if (!error) setPassages(next);
   };
 
   useEffect(() => {
@@ -365,7 +369,24 @@ export default function LibraryView({ onRequestTitle, flashRequest }) {
         className="min-h-0 flex-1 overflow-y-auto px-[18px] pb-6 select-none [-webkit-touch-callout:none]"
         style={{ touchAction: 'pan-y' }}
       >
-        {passages.length === 0 && pending.length === 0 && (
+        {loadError && (
+          <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
+            <p className="text-lg text-parchment/70">Couldn't load your library</p>
+            <p className="text-sm text-parchment/40">
+              Your passages are safe — this device just couldn't reach them. Check your connection and try again.
+            </p>
+            <button
+              type="button"
+              onClick={refresh}
+              className="mt-3 rounded-full border-none px-5 py-2 font-sans text-sm font-semibold"
+              style={{ background: 'rgb(var(--acc))', color: 'rgb(var(--on-acc))' }}
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
+        {!loadError && passages.length === 0 && pending.length === 0 && (
           <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
             <p className="text-lg text-parchment/70">No passages yet</p>
             <p className="text-sm text-parchment/40">
